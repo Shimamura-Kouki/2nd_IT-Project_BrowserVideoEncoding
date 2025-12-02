@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企画書 - Server-less Video Optimizer</title>
+    <style>
+        body {
+            font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px;
+        }
+
+        h1 {
+            font-size: 24px;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            font-size: 18px;
+            background-color: #f4f4f4;
+            padding: 8px 12px;
+            border-left: 5px solid #0056b3;
+            margin-top: 30px;
+        }
+
+        h3 {
+            font-size: 16px;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+
+        p,
+        li {
+            font-size: 14px;
+        }
+
+        ul {
+            padding-left: 20px;
+        }
+
+        .highlight {
+            color: #d9534f;
+            font-weight: bold;
+        }
+
+        .meta-info {
+            font-size: 12px;
+            color: #666;
+            text-align: right;
+            margin-bottom: 40px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="meta-info">
+        作成日: 202X年X月X日<br>
+        起案者: [あなたのお名前]
+    </div>
+
+    <h1>Server-less Video Optimizer<br><span style="font-size: 0.8em; font-weight: normal;">ブラウザ完結型・AI動画圧縮＆解析ラボ</span>
+    </h1>
+
+    <h2>1. 企画概要</h2>
+    <p>動画のアップロード不要。サーバーを使わず、ユーザーのブラウザ（ローカル環境）の演算能力のみを使って、プロ仕様の動画圧縮・変換・解析を行うWebアプリケーション。<br>
+        最新のWeb標準技術（WebCodecs API）とWebAssembly（FFmpeg,
+        MediaInfo）を駆使し、<strong>「Webブラウザはどこまでネイティブアプリに肉薄できるか」</strong>を技術的に実証する。</p>
+
+    <h2>2. 開発の動機・目的</h2>
+    <ul>
+        <li><strong>ローカル処理の極限追求:</strong> サーバーサイド処理が当たり前の現代において、あえてクライアントサイド（端末側）のリソースを限界まで引き出し、プライバシー保護とサーバーコストゼロを両立する。
+        </li>
+        <li><strong>AI高速開発の実践:</strong> 構想から実装まで、生成AI（LLM）をコーディングパートナーとしてフル活用し、約9時間という超短期間でのプロダクトローンチを目指す。</li>
+        <li><strong>ギークへの挑戦状:</strong> 「ブラウザでエンコード？どうせ重いんでしょ？」という技術者の先入観を、WebCodecsの爆速処理で覆す。</li>
+    </ul>
+
+    <h2>3. ターゲット利用者</h2>
+    <ul>
+        <li><strong>メイン（60%）：</strong> 開発者自身。「自分の欲しい・試したい環境」を究極まで突き詰めたツールとして。</li>
+        <li><strong>サブ（40%）：</strong>
+            <ul>
+                <li><strong>来場した技術好き（ギーク）：</strong> マニアックな設定項目や、ブラウザで動く技術的仕組みに興奮してくれる層。</li>
+                <li><strong>一般ユーザー：</strong> 「画質はそのまま、容量半分」のマジックを体験し、ストレージ節約のメリットを感じる層。</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h2>4. 提供する体験 (UX)</h2>
+    <h3>一般ユーザー向け体験</h3>
+    <p>「動画をドラッグ＆ドロップするだけ。数秒で解析が終わり、『おすすめ設定』ボタンを押せば、見た目は変わらないのにファイルサイズが半分以下の動画が出来上がる」</p>
+
+    <h3>ギーク向け体験</h3>
+    <p>「MediaInfoでコーデック詳細を確認し、WebCodecsとFFmpegエンジンを使い分け、CRF値やGOP設定を追い込む。さらに『Geekモード』でリアルタイムのビットレート推移グラフとFFmpegの生ログを監視できる」
+    </p>
+
+    <h2>5. 実装機能一覧</h2>
+    <ul>
+        <li><strong>動画詳細解析機能 (New):</strong> <code>MediaInfo.js</code> を内蔵し、動画のコーデック、ビットレート、カラープロファイル等のメタデータを瞬時に表示。</li>
+        <li><strong>デュアル・エンコードエンジン:</strong>
+            <ul>
+                <li><strong>Speed Mode:</strong> WebCodecs APIによるハードウェア加速エンコード。</li>
+                <li><strong>Compat Mode:</strong> ffmpeg.wasmによる高互換エンコード。</li>
+            </ul>
+        </li>
+        <li><strong>ハイブリッドAIアシスタント:</strong> Cloud(Gemini)とLocal(WebLLM)を自動で使い分け、最適な圧縮設定を提案・コード生成。</li>
+        <li><strong>設定共有ラボ:</strong> 作成したエンコード設定(レシピ)を保存し、QRコードで共有。スマホ実機での再現検証を容易にする。</li>
+    </ul>
+
+    <h2>6. 技術スタック・開発環境</h2>
+    <ul>
+        <li><strong>Frontend:</strong> HTML5, WebCodecs API, ffmpeg.wasm, MediaInfo.js, Chart.js</li>
+        <li><strong>Backend:</strong> PHP (API Proxy), MySQL (Metadata Storage)</li>
+        <li><strong>Infrastructure (Dev):</strong> Windows PC + XAMPP + <strong>Tailscale (HTTPS/MagicDNS)</strong> for
+            Secure Context & Real-device debugging.</li>
+        <li><strong>Infrastructure (Prod):</strong> さくらレンタルサーバー (COOP/COEP Header Configured)</li>
+    </ul>
+
+    <h2>7. 開発スケジュール (Total: 9h)</h2>
+    <ul>
+        <li><strong>Session 1 (3h):</strong> 環境構築(Tailscale)、MediaInfo解析の実装、WebCodecsプロトタイプ作成。</li>
+        <li><strong>Session 2 (3h):</strong> FFmpegフォールバック実装、AI連携(Gemini)、設定保存API作成。</li>
+        <li><strong>Session 3 (3h):</strong> UI構築(Chart.js/Geekモード)、実機テスト、デモ用動画準備。</li>
+    </ul>
+
+</body>
+
+</html>

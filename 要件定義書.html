@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>要件定義書 v3.0 - Server-less Video Optimizer</title>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1,
+        h2 {
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+
+        h3 {
+            margin-top: 1.5em;
+            font-weight: bold;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 15px 0;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        .tag {
+            background: #007bff;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>要件定義書 v3.0</h1>
+    <p><strong>Version:</strong> 3.0 Final<br>
+        <strong>Scope:</strong> 展示会向けデモアプリケーション開発
+    </p>
+
+    <h2>1. システム構成図 (概念)</h2>
+    <p>Tailscale環境(Dev) または HTTPSサーバー上で動作するPWA。バックエンド処理は持たず、Litterbox APIへのPOSTのみ外部通信を行う。</p>
+
+    <h2>2. 機能要件</h2>
+
+    <h3>(1) ユーザーインターフェース (UI)</h3>
+    <table>
+        <tr>
+            <th>画面モード</th>
+            <th>要件詳細</th>
+        </tr>
+        <tr>
+            <td><strong>Simple Mode (Default)</strong></td>
+            <td>D&Dエリア、AI解析ボタン、プリセット選択ボタン（スマホ用/添付用）のみを表示。技術用語は隠蔽する。</td>
+        </tr>
+        <tr>
+            <td><strong>Geek Mode</strong></td>
+            <td>トグルスイッチにより展開。左側にプレビュー、右側にダッシュボードとコンソールを表示。</td>
+        </tr>
+    </table>
+
+    <h3>(2) AI制御 & Adaptive Strategy</h3>
+    <p>AIモデルの性能に応じて、生成するコマンドの複雑性と制御方法を動的に切り替える。</p>
+    <ul>
+        <li><strong>Safety Mode (Nano等):</strong>
+            AIはJSON形式の設定値のみを出力（<code>{crf: 23, preset: 'fast'}</code>）。JS側のテンプレートエンジンがFFmpegコマンドを組み立てる。</li>
+        <li><strong>Advanced Mode (Cloud/High-End):</strong> AIが直接FFmpegの生コマンド（Raw String）を生成。フィルタチェーン等の複雑な処理を許容。</li>
+        <li><strong>Self-Healing (自己修復機能):</strong>
+            <ul>
+                <li>Advanced ModeでFFmpegエラーが発生した場合、エラーログをAIにフィードバック。</li>
+                <li>AIは修正したコマンドを再提示する。このプロセス（思考ログ）をコンソールに表示する。</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>(3) Geek Dashboard (可視化)</h3>
+    <ul>
+        <li><strong>圧縮率比較:</strong> 元ファイルサイズ vs 予想/結果サイズのバーグラフ。</li>
+        <li><strong>AI Monitor:</strong> 使用モデル名、推論速度(tokens/sec)、メモリ使用量をリアルタイム表示。</li>
+        <li><strong>Media Info:</strong> ビットレート推移、コーデック詳細。</li>
+    </ul>
+
+    <h3>(4) エクスポート & The Souvenir</h3>
+    <ul>
+        <li><strong>QR Code出力:</strong> 最終的に成功したFFmpegコマンドを表示。</li>
+        <li><strong>Colab Notebook生成:</strong>
+            <ul>
+                <li>現在の処理（動画DL→FFmpeg実行）を再現するPythonコード(.ipynb)を動的に生成。</li>
+                <li><strong>Litterbox連携:</strong> 生成したファイルを <code>https://litterbox.catbox.moe/</code>
+                    APIへアップロード（有効期限付き）。</li>
+                <li>発行されたURLをQRコード化して画面に表示。</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h2>3. 非機能要件</h2>
+    <ul>
+        <li><strong>Network:</strong> 基本オフライン動作（Litterboxアップロード時のみ通信発生）。</li>
+        <li><strong>Security:</strong> GitHubアカウント連携は行わない（API Key管理リスクの排除）。</li>
+        <li><strong>Performance:</strong> メモリ管理機能を実装し、iOS等のメモリ制限環境でのクラッシュを抑制する。</li>
+    </ul>
+
+</body>
+
+</html>
