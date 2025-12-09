@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>要件定義書 v3.2 - Server-less Video Optimizer</title>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1,
+        h2 {
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+
+        h3 {
+            margin-top: 1.5em;
+            font-weight: bold;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 15px 0;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        .tag {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            color: white;
+            margin-left: 0.5em;
+            vertical-align: middle;
+        }
+
+        .tag-restored {
+            background: #28a745;
+        }
+
+        .tag-core {
+            background: #0366d6;
+        }
+
+        .conditional {
+            background: #fff3cd;
+            color: #856404;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            border: 1px solid #ffeeba;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>要件定義書 v3.2 (Functional Restoration)</h1>
+    <p><strong>Version:</strong> 3.2<br>
+        <strong>Scope:</strong> AI技術検証(PoC)と、実用的なWebアプリ機能の完全統合
+    </p>
+
+    <h2>1. 開発フェーズ定義 (Hybrid)</h2>
+    <p>AI機能の不確実性（実験要素）と、ツールとしての確実性（基本機能）を分離して定義する。</p>
+    <ul>
+        <li><strong>Core Layer:</strong> AIの有無に関わらず、動画・画像の変換ツールとして100%動作保証する。</li>
+        <li><strong>AI Layer (PoC):</strong> Gemini Nano等の実験を行い、成功時のみAdaptive Strategyを有効化する。</li>
+    </ul>
+
+    <h2>2. 機能要件</h2>
+
+    <h3>(1) マルチメディア処理エンジン <span class="tag tag-core">Core</span></h3>
+    <p>v3.1で省略された詳細仕様を再定義。</p>
+    <ul>
+        <li><strong>WebCodecs API (Dual Stream):</strong> <span class="tag tag-restored">復活</span>
+            <ul>
+                <li>映像(VideoEncoder)に加え、<strong>音声(AudioEncoder)</strong>の圧縮処理を実装。</li>
+                <li><strong>MP4Box.js</strong> を使用し、処理後のストリームをMP4コンテナに結合(Muxing)する。</li>
+            </ul>
+        </li>
+        <li><strong>Image Optimizer:</strong> <span class="tag tag-restored">復活</span>
+            <ul>
+                <li>動画サムネイルや資料画像のドラッグ＆ドロップを受け付け、WebP/JPEGに軽量化する機能。</li>
+            </ul>
+        </li>
+        <li><strong>MediaInfo Analysis:</strong> <span class="tag tag-restored">復活</span>
+            <ul>
+                <li>MediaInfo.jsを内蔵し、コーデック・プロファイル・色空間の詳細メタデータを表示する。</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>(2) システム基盤 & 安定性</h3>
+    <ul>
+        <li><strong>PWA (Offline Capability):</strong> <span class="tag tag-restored">復活</span>
+            <ul>
+                <li>Service Workerを実装し、会場のWi-Fi切断時でもアプリの起動・処理を可能にする。</li>
+            </ul>
+        </li>
+        <li><strong>Memory Manager:</strong> <span class="tag tag-restored">復活</span>
+            <ul>
+                <li>生成した動画Blobを明示的に破棄する「メモリ解放ボタン」を設置。</li>
+                <li>iOS(iPhone 7等)向けに、処理完了時に自動でメモリを掃除するオプションを用意。</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h3>(3) AI制御 & 自己修復 (PoC Layer)</h3>
+    <p><span class="conditional">実装条件: 事前実験にて動作確認済みであること</span></p>
+    <ul>
+        <li><strong>Adaptive Strategy:</strong>
+            <ul>
+                <li>Gemini Nano有効時: 安全なJSON生成（テンプレート適用）。</li>
+                <li>Cloud/WebLLM有効時: 生のFFmpegコマンド生成とSelf-Healing（エラー修正）の実演。</li>
+            </ul>
+        </li>
+        <li><strong>Fallback:</strong> AI全滅時は、ハードコードされた「推奨プリセット（松竹梅）」モードへ自動移行。</li>
+    </ul>
+
+    <h3>(4) エクスポート (The Souvenir)</h3>
+    <ul>
+        <li><strong>Gist & Litterbox Integration:</strong> <span class="tag tag-restored">復活</span>
+            <ul>
+                <li><strong>GitHub Gist:</strong> 生成されたコードやColab Notebookを保存（"Open in Colab"用）。</li>
+                <li><strong>Litterbox/File.io:</strong> 一時的なファイル共有用。</li>
+                <li>これらをQRコード化してスマホで持ち帰り可能にする。</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h2>3. ユーザーインターフェース (UI)</h2>
+    <table>
+        <tr>
+            <th>画面モード</th>
+            <th>要件詳細</th>
+        </tr>
+        <tr>
+            <td><strong>Simple Mode</strong></td>
+            <td>ファイル(動画/画像)選択と実行ボタンのみ。進捗バー表示。</td>
+        </tr>
+        <tr>
+            <td><strong>Geek Mode</strong></td>
+            <td>
+                FFmpegログ(Speed/Bitrate)の可視化グラフ。<br>
+                AI推論のステータスモニター。<br>
+                <strong>Before/After比較スライダー</strong> (<span class="tag tag-restored">復活</span>)。
+            </td>
+        </tr>
+    </table>
+
+</body>
+
+</html>
