@@ -1,0 +1,21 @@
+{
+    "name": "browser-video-encoder",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "svelte": "^5.0.0",
+        "mp4-muxer": "^3.0.1",
+        "mp4box": "^0.5.4"
+    },
+    "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^4.0.0",
+        "typescript": "^5.6.3",
+        "vite": "^5.0.0"
+    }
+}

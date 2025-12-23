@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser Video Encoder</title>
+    <!-- CDN Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: system-ui, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            background: white;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            margin-bottom: 24px;
+            color: #333;
+        }
+
+        .section {
+            margin-bottom: 24px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .section:last-child {
+            border-bottom: none;
+        }
+
+        .dropzone {
+            border: 2px dashed #888;
+            padding: 40px;
+            text-align: center;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .dropzone:hover {
+            border-color: #2979ff;
+            background: #f0f7ff;
+        }
+
+        .dropzone.dragover {
+            border-color: #2979ff;
+            background: #e8f5ff;
+        }
+
+        .dropzone input {
+            display: none;
+        }
+
+        .dropzone p {
+            color: #666;
+            margin-top: 8px;
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .row label {
+            font-weight: 500;
+            color: #333;
+            min-width: 100px;
+        }
+
+        .row input,
+        .row select {
+            flex: 1;
+            min-width: 200px;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .row input:focus,
+        .row select:focus {
+            outline: none;
+            border-color: #2979ff;
+            box-shadow: 0 0 0 3px rgba(41, 121, 255, 0.1);
+        }
+
+        .progress-section {
+            display: none;
+        }
+
+        .progress-section.active {
+            display: block;
+        }
+
+        .progress {
+            height: 8px;
+            background: #eee;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .progress>div {
+            height: 100%;
+            background: #2979ff;
+            width: 0%;
+            transition: width 0.2s;
+        }
+
+        .stats {
+            font-size: 14px;
+            color: #666;
+        }
+
+        button {
+            padding: 10px 16px;
+            background: #2979ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #1e5db8;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #ccc;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .message.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .message.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .message.info {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>ブラウザ動画エンコーダ</h1>
+
+        <div class="section">
+            <h2 style="font-size: 16px; margin-bottom: 12px;">API 設定</h2>
+            <div class="row">
+                <label>API エンドポイント:</label>
+                <input id="apiBase" type="text" value="../backend/public/api/index.php"
+                    placeholder="../backend/public/api/index.php">
+                <button onclick="testAPI()">接続テスト</button>
+            </div>
+            <div id="apiMessage"></div>
+        </div>
+
+        <div class="section">
+            <h2 style="font-size: 16px; margin-bottom: 12px;">ファイル選択</h2>
+            <div class="dropzone" id="dropzone" ondrop="handleDrop(event)" ondragover="handleDragOver(event)"
+                ondragleave="handleDragLeave(event)" onclick="document.getElementById('fileInput').click()">
+                <input type="file" id="fileInput" accept="video/mp4" onchange="handleFileSelect()"
+                    style="display:none;">
+                <p>MP4 ファイルをドラッグ&ドロップ<br>または<br><u>クリックして選択</u></p>
+            </div>
+            <div id="fileInfo" style="margin-top: 12px; font-size: 14px; color: #666;"></div>
+        </div>
+
+        <div class="section">
+            <h2 style="font-size: 16px; margin-bottom: 12px;">エンコード設定</h2>
+            <div class="row">
+                <label>プリセット:</label>
+                <select id="presetSelect" onchange="updatePresetInfo()">
+                    <option value="">読み込み中...</option>
+                </select>
+            </div>
+            <div id="presetInfo"
+                style="font-size: 13px; color: #666; padding: 8px; background: #f9f9f9; border-radius: 4px;"></div>
+        </div>
+
+        <div class="section">
+            <h2 style="font-size: 16px; margin-bottom: 12px;">ユーザー情報</h2>
+            <div class="row">
+                <label>ユーザー名:</label>
+                <input id="userName" type="text" placeholder="Your name">
+            </div>
+            <div class="row">
+                <label>コメント:</label>
+                <input id="comment" type="text" placeholder="任意のコメント">
+            </div>
+        </div>
+
+        <div class="section">
+            <button id="encodeBtn" onclick="startEncoding()" disabled
+                style="width: 100%; padding: 12px;">エンコード開始</button>
+        </div>
+
+        <div class="section progress-section" id="progressSection">
+            <h2 style="font-size: 16px; margin-bottom: 12px;">処理中...</h2>
+            <div class="progress">
+                <div id="progressBar" style="width: 0%;"></div>
+            </div>
+            <div class="stats">
+                <div>進捗: <span id="progressPct">0</span>%</div>
+                <div>FPS: <span id="fps">-</span></div>
+                <div>経過時間: <span id="elapsed">0</span>秒</div>
+            </div>
+        </div>
+
+        <div class="section" id="resultSection" style="display: none;">
+            <h2 style="font-size: 16px; margin-bottom: 12px;">エンコード完了</h2>
+            <button id="shareBtn" onclick="shareResult()"
+                style="width: 100%; padding: 12px; margin-bottom: 12px;">結果を共有</button>
+            <div id="shareMessage"></div>
+        </div>
+    </div>
+
+    <!-- 先にグローバル関数を定義 -->
+    <script>
+        let selectedFile = null;
+        let presets = [];
+        let encodeResult = null;
+
+        window.testAPI = async function () {
+            const apiBase = document.getElementById('apiBase').value;
+            const msg = document.getElementById('apiMessage');
+            try {
+                const res = await fetch(apiBase + '?action=preset_index');
+                if (res.ok) {
+                    const data = await res.json();
+                    msg.innerHTML = `<div class="message success">✓ API 接続成功 (${data.length} プリセット)</div>`;
+                    loadPresets();
+                } else {
+                    msg.innerHTML = `<div class="message error">✗ API エラー: ${res.status}</div>`;
+                }
+            } catch (e) {
+                msg.innerHTML = `<div class="message error">✗ 接続失敗: ${e.message}</div>`;
+            }
+        };
+
+        window.loadPresets = async function () {
+            const apiBase = document.getElementById('apiBase').value;
+            try {
+                const res = await fetch(apiBase + '?action=preset_index');
+                presets = await res.json();
+                const select = document.getElementById('presetSelect');
+                select.innerHTML = presets.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
+                updatePresetInfo();
+                document.getElementById('encodeBtn').disabled = !selectedFile;
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        window.updatePresetInfo = function () {
+            const idx = parseInt(document.getElementById('presetSelect').value || 0);
+            const p = presets[idx];
+            if (p) {
+                const cfg = p.config_json;
+                document.getElementById('presetInfo').innerHTML = `<div><strong>${p.name}</strong></div><div>解像度: ${cfg.width}×${cfg.height} @ ${cfg.framerate}fps</div><div>ビットレート: ${(cfg.bitrate / 1000000).toFixed(1)} Mbps</div>`;
+            }
+        };
+
+        window.handleFileSelect = function () {
+            const input = document.getElementById('fileInput');
+            selectedFile = input.files[0] || null;
+            updateFileInfo();
+        };
+
+        window.handleDrop = function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            document.getElementById('dropzone').classList.remove('dragover');
+            selectedFile = e.dataTransfer.files[0] || null;
+            updateFileInfo();
+        };
+
+        window.handleDragOver = function (e) {
+            e.preventDefault();
+            document.getElementById('dropzone').classList.add('dragover');
+        };
+
+        window.handleDragLeave = function (e) {
+            document.getElementById('dropzone').classList.remove('dragover');
+        };
+
+        function updateFileInfo() {
+            const info = document.getElementById('fileInfo');
+            if (selectedFile) {
+                info.textContent = `選択: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)`;
+                document.getElementById('encodeBtn').disabled = presets.length === 0;
+            } else {
+                info.textContent = '';
+                document.getElementById('encodeBtn').disabled = true;
+            }
+        }
+
+        window.shareResult = async function () {
+            if (!encodeResult) return;
+            const apiBase = document.getElementById('apiBase').value;
+            const userName = document.getElementById('userName').value.trim();
+            if (!userName) {
+                alert('ユーザー名を入力してください');
+                return;
+            }
+
+            const idx = parseInt(document.getElementById('presetSelect').value || 0);
+            const preset = presets[idx];
+
+            try {
+                const res = await fetch(apiBase + '?action=post_store', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_name: userName,
+                        config_json: preset.config_json,
+                        benchmark_result: encodeResult
+                    })
+                });
+                const result = await res.json();
+                if (result.message) {
+                    document.getElementById('shareMessage').innerHTML = `<div class="message success">✓ ${result.message}</div>`;
+                }
+            } catch (e) {
+                document.getElementById('shareMessage').innerHTML = `<div class="message error">✗ 共有失敗: ${e.message}</div>`;
+            }
+        };
+    </script>
+
+    <script type="module">
+        import { Muxer, FileSystemWritableFileStreamTarget } from 'https://cdn.jsdelivr.net/npm/mp4-muxer@3.0.1/+esm';
+        import { demuxAndDecode } from './lib/demuxer.js';
+        import { encodeToFile } from './lib/encoder.js';
+
+        // mp4-muxerをグローバルに設定
+        window.Mp4MuxerClasses = { Muxer, FileSystemWritableFileStreamTarget };
+
+        window.startEncoding = async function () {
+            if (!selectedFile) return;
+            const idx = parseInt(document.getElementById('presetSelect').value || 0);
+            const preset = presets[idx];
+            if (!preset) return;
+
+            const cfg = preset.config_json;
+            const config = {
+                video: { codec: cfg.codec, width: cfg.width, height: cfg.height, bitrate: cfg.bitrate, framerate: cfg.framerate },
+                audio: { codec: 'mp4a.40.2', sampleRate: 44100, numberOfChannels: 2, bitrate: cfg.audio_bitrate || 128000 }
+            };
+
+            document.getElementById('progressSection').classList.add('active');
+            document.getElementById('encodeBtn').disabled = true;
+            const startTime = performance.now();
+
+            try {
+                console.log('Starting encode process...');
+                await encodeToFile(selectedFile, config, (pct, stats) => {
+                    if (pct !== undefined) {
+                        document.getElementById('progressBar').style.width = pct + '%';
+                        document.getElementById('progressPct').textContent = Math.round(pct);
+                    }
+                    if (stats) {
+                        const fpsVal = Number(stats.fps);
+                        const elapsedSec = Number(stats.elapsedMs) / 1000;
+                        document.getElementById('fps').textContent = Number.isFinite(fpsVal) ? fpsVal.toFixed(1) : '-';
+                        document.getElementById('elapsed').textContent = Number.isFinite(elapsedSec) ? elapsedSec.toFixed(1) : '-';
+                    }
+                }, demuxAndDecode);
+
+                encodeResult = {
+                    process_time_ms: Math.round(performance.now() - startTime),
+                    source_size_byte: selectedFile.size,
+                    output_size_byte: 0,
+                    avg_fps: 0
+                };
+
+                document.getElementById('progressSection').classList.remove('active');
+                document.getElementById('resultSection').style.display = 'block';
+            } catch (e) {
+                console.error('Encoding error:', e);
+                alert('エンコードエラー: ' + e.message + '\n詳細: ' + e.stack);
+                document.getElementById('progressSection').classList.remove('active');
+                document.getElementById('encodeBtn').disabled = false;
+            }
+        };
+
+        loadPresets();
+    </script>
+</body>
+
+</html>
