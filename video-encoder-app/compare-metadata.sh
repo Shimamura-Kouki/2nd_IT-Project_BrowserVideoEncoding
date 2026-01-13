@@ -87,7 +87,6 @@ if ! [[ "$OUTPUT_AUDIO_COUNT" =~ ^[0-9]+$ ]]; then
     OUTPUT_AUDIO_COUNT=0
 fi
 
-# Ensure counts are valid numbers (defaults already set above)
 echo "Source Audio Tracks: $SOURCE_AUDIO_COUNT"
 echo "Output Audio Tracks: $OUTPUT_AUDIO_COUNT"
 echo ""
