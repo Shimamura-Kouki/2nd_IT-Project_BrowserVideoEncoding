@@ -19,13 +19,10 @@ export async function encodeToFile(file, config, onProgress) {
     let videoEncoder = null;
     let audioEncoder = null;
     let frameCount = 0;
-    let totalFrames = 0;
     const start = performance.now();
 
     // Callback to initialize muxer and encoders once we know if source has audio
-    const initializeEncoders = (hasAudio, totalVideoFrames) => {
-        totalFrames = totalVideoFrames;
-        
+    const initializeEncoders = (hasAudio) => {
         // Create muxer with appropriate configuration
         const muxerConfig = {
             target: new FileSystemWritableFileStreamTarget(fileStream),
@@ -84,15 +81,7 @@ export async function encodeToFile(file, config, onProgress) {
             frame.close();
             const elapsedMs = performance.now() - start;
             const fps = frameCount / (elapsedMs / 1000);
-            
-            // Calculate encoding progress: 10% from demuxing + 90% from encoding
-            // Progress is 10% + (frameCount/totalFrames * 90%)
-            let encodingProgress = 10;
-            if (totalFrames > 0) {
-                encodingProgress = 10 + (frameCount / totalFrames) * 90;
-            }
-            
-            onProgress(encodingProgress, { fps, elapsedMs });
+            onProgress(undefined, { fps, elapsedMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
     });
@@ -109,19 +98,8 @@ export async function encodeToFile(file, config, onProgress) {
 
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
 
-    // CRITICAL FIX: Wait for all decoders to finish processing their queues
-    await videoDecoder.flush();
-    if (audioDecoder && demuxResult.hasAudio) {
-        await audioDecoder.flush();
-    }
-
-    // Now flush encoders after decoders are done
     await videoEncoder.flush();
     if (audioEncoder) await audioEncoder.flush();
-    
-    // Set progress to 100% before finalizing
-    onProgress(100);
-    
     muxer.finalize();
     await fileStream.close();
 }

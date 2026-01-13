@@ -5,7 +5,7 @@ import MP4Box from 'mp4box';
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder
- * @param {(hasAudio: boolean, totalFrames: number)=>void} onReady - Called when metadata is ready with audio availability info and total frame count
+ * @param {(hasAudio: boolean)=>void} onReady - Called when metadata is ready with audio availability info
  * @param {(pct:number)=>void} onProgress
  * @returns {Promise<{hasAudio: boolean}>}
  */
@@ -18,7 +18,6 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
 
         mp4boxfile.onReady = (info) => {
             const videoTrack = info.videoTracks?.[0];
-            let totalFrames = 0;
             if (videoTrack) {
                 videoTrackId = videoTrack.id;
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
@@ -30,10 +29,6 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                     description
                 });
                 mp4boxfile.setExtractionOptions(videoTrackId, 'video', { nbSamples: 100 });
-                
-                // Calculate total frames from duration and framerate
-                // info.duration is in timescale units
-                totalFrames = videoTrack.nb_samples || 0;
             }
 
             const audioTrack = info.audioTracks?.[0];
@@ -49,7 +44,7 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             }
 
             // Call the onReady callback to initialize encoders and muxer
-            onReady(hasAudio, totalFrames);
+            onReady(hasAudio);
 
             mp4boxfile.start();
         };
@@ -87,9 +82,7 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         buffer.fileStart = offset;
         mp4boxfile.appendBuffer(buffer);
         offset += buffer.byteLength;
-        // Demuxing phase is only 10% of total progress
-        // The remaining 90% will be reported during encoding
-        onProgress(Math.min(10, (offset / file.size) * 10));
+        onProgress(Math.min(100, (offset / file.size) * 100));
         if (offset < file.size) {
             readNextChunk();
         } else {
