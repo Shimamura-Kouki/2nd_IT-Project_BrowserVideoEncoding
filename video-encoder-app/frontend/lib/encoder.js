@@ -309,8 +309,8 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('✅ Counters reset for second encoding pass');
 
     await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
-        const percent = pct;
-        onProgress({ stage: 'encoding', percent, fps: undefined, elapsedMs: performance.now() - start });
+        // Don't report demuxing progress during encoding pass - it overrides real encoding progress
+        // The actual encoding progress is reported by videoEncoder.output callback
     });
 
     console.log('\n' + '='.repeat(70));
