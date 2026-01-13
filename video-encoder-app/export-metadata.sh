@@ -11,7 +11,7 @@ if [ $# -lt 1 ]; then
 fi
 
 INPUT_FILE="$1"
-OUTPUT_FILE="${2:-${INPUT_FILE%.mp4}.xml}"
+OUTPUT_FILE="${2:-${INPUT_FILE%.*}.xml}"
 
 # Check if input file exists
 if [ ! -f "$INPUT_FILE" ]; then

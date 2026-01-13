@@ -25,6 +25,13 @@ Exports video file metadata to XML format.
 ./export-metadata.sh input.mp4
 # Creates: input.xml
 
+# Works with other video formats too
+./export-metadata.sh video.mov
+# Creates: video.xml
+
+./export-metadata.sh recording.webm
+# Creates: recording.xml
+
 # Export metadata with custom XML filename
 ./export-metadata.sh 画面録画.mp4 source-metadata.xml
 # Creates: source-metadata.xml
@@ -48,6 +55,10 @@ Compares metadata between source and output video files, helping validate the en
 ```bash
 # Compare original recording with encoded output
 ./compare-metadata.sh 画面録画.mp4 output.mp4
+
+# Works with other video formats too
+./compare-metadata.sh source.mov output.mp4
+./compare-metadata.sh recording.webm encoded.mp4
 ```
 
 #### Output

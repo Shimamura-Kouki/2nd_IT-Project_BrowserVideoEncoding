@@ -11,8 +11,8 @@ fi
 
 SOURCE_FILE="$1"
 OUTPUT_FILE="$2"
-SOURCE_XML="${SOURCE_FILE%.mp4}.xml"
-OUTPUT_XML="${OUTPUT_FILE%.mp4}.xml"
+SOURCE_XML="${SOURCE_FILE%.*}.xml"
+OUTPUT_XML="${OUTPUT_FILE%.*}.xml"
 
 # Check if input files exist
 if [ ! -f "$SOURCE_FILE" ]; then
@@ -39,12 +39,18 @@ echo ""
 
 # Export metadata for both files
 echo "Exporting metadata for source file..."
-mediainfo --Output=XML "$SOURCE_FILE" > "$SOURCE_XML"
+if ! mediainfo --Output=XML "$SOURCE_FILE" > "$SOURCE_XML"; then
+    echo "Error: Failed to export metadata for source file"
+    exit 1
+fi
 echo "Saved to: $SOURCE_XML"
 echo ""
 
 echo "Exporting metadata for output file..."
-mediainfo --Output=XML "$OUTPUT_FILE" > "$OUTPUT_XML"
+if ! mediainfo --Output=XML "$OUTPUT_FILE" > "$OUTPUT_XML"; then
+    echo "Error: Failed to export metadata for output file"
+    exit 1
+fi
 echo "Saved to: $OUTPUT_XML"
 echo ""
 
