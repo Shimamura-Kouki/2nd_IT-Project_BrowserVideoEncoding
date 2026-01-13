@@ -79,12 +79,9 @@ echo ""
 SOURCE_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$SOURCE_FILE" 2>/dev/null || echo "0")
 OUTPUT_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$OUTPUT_FILE" 2>/dev/null || echo "0")
 
-# Ensure counts are valid numbers
-SOURCE_AUDIO_COUNT="${SOURCE_AUDIO_COUNT:-0}"
-OUTPUT_AUDIO_COUNT="${OUTPUT_AUDIO_COUNT:-0}"
-
-echo "Source Audio Tracks: ${SOURCE_AUDIO_COUNT:-0}"
-echo "Output Audio Tracks: ${OUTPUT_AUDIO_COUNT:-0}"
+# Ensure counts are valid numbers (defaults already set above)
+echo "Source Audio Tracks: $SOURCE_AUDIO_COUNT"
+echo "Output Audio Tracks: $OUTPUT_AUDIO_COUNT"
 echo ""
 
 if [ "$SOURCE_AUDIO_COUNT" = "0" ] && [ "$OUTPUT_AUDIO_COUNT" = "0" ]; then

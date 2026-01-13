@@ -9,6 +9,14 @@ This directory contains utilities to export and compare video metadata in XML fo
 - For macOS: `brew install mediainfo`
 - For Windows: Download from https://mediaarea.net/en/MediaInfo
 
+## Setup
+Before using the scripts for the first time, ensure they have executable permissions:
+```bash
+chmod +x export-metadata.sh compare-metadata.sh
+```
+
+This step is only needed once.
+
 ## Tools
 
 ### 1. export-metadata.sh
