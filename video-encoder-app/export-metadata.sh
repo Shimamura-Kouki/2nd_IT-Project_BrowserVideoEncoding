@@ -28,14 +28,14 @@ fi
 
 # Export metadata to XML
 echo "Exporting metadata from '$INPUT_FILE' to '$OUTPUT_FILE'..."
-mediainfo --Output=XML "$INPUT_FILE" > "$OUTPUT_FILE"
-
-if [ $? -eq 0 ]; then
-    echo "Success! Metadata exported to: $OUTPUT_FILE"
-    echo ""
-    echo "Summary:"
-    mediainfo "$INPUT_FILE" | grep -E "(General|Video|Audio)" | head -20
-else
+if ! mediainfo --Output=XML "$INPUT_FILE" > "$OUTPUT_FILE"; then
     echo "Error: Failed to export metadata"
     exit 1
+fi
+
+echo "Success! Metadata exported to: $OUTPUT_FILE"
+echo ""
+echo "Summary:"
+if ! mediainfo "$INPUT_FILE" | grep -E "(General|Video|Audio)" | head -20; then
+    echo "Warning: Could not display summary"
 fi
