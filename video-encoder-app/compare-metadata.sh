@@ -75,22 +75,30 @@ echo "Track Comparison"
 echo "=========================================="
 echo ""
 
-# Check for audio tracks
-SOURCE_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$SOURCE_FILE" 2>/dev/null || echo "0")
-OUTPUT_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$OUTPUT_FILE" 2>/dev/null || echo "0")
+# Check for audio tracks with validation
+SOURCE_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$SOURCE_FILE" 2>/dev/null)
+OUTPUT_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$OUTPUT_FILE" 2>/dev/null)
+
+# Validate that counts are numeric, default to 0 if not
+if ! [[ "$SOURCE_AUDIO_COUNT" =~ ^[0-9]+$ ]]; then
+    SOURCE_AUDIO_COUNT=0
+fi
+if ! [[ "$OUTPUT_AUDIO_COUNT" =~ ^[0-9]+$ ]]; then
+    OUTPUT_AUDIO_COUNT=0
+fi
 
 # Ensure counts are valid numbers (defaults already set above)
 echo "Source Audio Tracks: $SOURCE_AUDIO_COUNT"
 echo "Output Audio Tracks: $OUTPUT_AUDIO_COUNT"
 echo ""
 
-if [ "$SOURCE_AUDIO_COUNT" = "0" ] && [ "$OUTPUT_AUDIO_COUNT" = "0" ]; then
+if [ "$SOURCE_AUDIO_COUNT" -eq 0 ] && [ "$OUTPUT_AUDIO_COUNT" -eq 0 ]; then
     echo "✓ PASS: Both files have no audio track (video-only encoding worked correctly)"
-elif [ "$SOURCE_AUDIO_COUNT" != "0" ] && [ "$OUTPUT_AUDIO_COUNT" != "0" ]; then
+elif [ "$SOURCE_AUDIO_COUNT" -ne 0 ] && [ "$OUTPUT_AUDIO_COUNT" -ne 0 ]; then
     echo "✓ PASS: Both files have audio tracks"
-elif [ "$SOURCE_AUDIO_COUNT" = "0" ] && [ "$OUTPUT_AUDIO_COUNT" != "0" ]; then
+elif [ "$SOURCE_AUDIO_COUNT" -eq 0 ] && [ "$OUTPUT_AUDIO_COUNT" -ne 0 ]; then
     echo "✗ FAIL: Output has audio track but source doesn't (unexpected empty audio track)"
-elif [ "$SOURCE_AUDIO_COUNT" != "0" ] && [ "$OUTPUT_AUDIO_COUNT" = "0" ]; then
+elif [ "$SOURCE_AUDIO_COUNT" -ne 0 ] && [ "$OUTPUT_AUDIO_COUNT" -eq 0 ]; then
     echo "⚠ WARNING: Source has audio but output doesn't (audio was not encoded)"
 fi
 
