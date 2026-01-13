@@ -183,14 +183,13 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
 
     // ===== STEP 1: ファイル形式を先に検出（Muxer 初期化前）=====
     console.log('STEP 1: Detecting format...');
-    const detectedFormat = await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
-        const percent = pct; // 0-100%
-        onProgress({ stage: 'reading', percent, fps: undefined, elapsedMs: performance.now() - start });
+    // 最初のパスは進捗を報告しない（高速なため）
+    const detectedFormat = await demuxAndDecode(file, videoDecoder, audioDecoder, () => {
+        // 進捗報告なし - フォーマット検出は高速なため
     });
     console.log('Detected format:', detectedFormat);
 
-    // エンコード段階に移行
-    onProgress({ stage: 'encoding', percent: 0, fps: 0, elapsedMs: performance.now() - start });
+    // エンコード段階に移行（読み込みステージとして開始）
     totalVideoDurationUs = Number(detectedFormat.video?.durationUs) || 0;
     console.log('Encoding stage started. Total duration:', totalVideoDurationUs, 'us');
 
@@ -306,11 +305,13 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     audioChunkAddedCount = 0;
     videoBaseTsUs = null;
     audioBaseTsUs = null;
+    encodedVideoUs = 0;  // エンコード進捗もリセット
     console.log('✅ Counters reset for second encoding pass');
 
     await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
+        // ファイル読み込み進捗は 'reading' ステージとして報告
         const percent = pct;
-        onProgress({ stage: 'encoding', percent, fps: undefined, elapsedMs: performance.now() - start });
+        onProgress({ stage: 'reading', percent, fps: undefined, elapsedMs: performance.now() - start });
     });
 
     console.log('\n' + '='.repeat(70));
@@ -338,10 +339,14 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('Total audio chunks added to muxer:', audioChunkAddedCount);
 
     await videoEncoder.flush();
-    if (audioEncoder) await audioEncoder.flush();
     onProgress({ stage: 'flushing', percent: 50, fps: undefined, elapsedMs: performance.now() - start });
+    if (audioEncoder) {
+        await audioEncoder.flush();
+    }
+    onProgress({ stage: 'flushing', percent: 100, fps: undefined, elapsedMs: performance.now() - start });
 
     console.log('Finalizing muxer...');
+    onProgress({ stage: 'finalizing', percent: 0, fps: undefined, elapsedMs: performance.now() - start });
     muxer.finalize();
     onProgress({ stage: 'finalizing', percent: 50, fps: undefined, elapsedMs: performance.now() - start });
 
