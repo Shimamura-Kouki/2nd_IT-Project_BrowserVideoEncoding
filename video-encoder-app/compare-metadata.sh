@@ -57,13 +57,17 @@ echo ""
 echo "=========================================="
 echo "Source File: $SOURCE_FILE"
 echo "=========================================="
-mediainfo "$SOURCE_FILE"
+if ! mediainfo "$SOURCE_FILE"; then
+    echo "Warning: Could not display source file metadata"
+fi
 echo ""
 
 echo "=========================================="
 echo "Output File: $OUTPUT_FILE"
 echo "=========================================="
-mediainfo "$OUTPUT_FILE"
+if ! mediainfo "$OUTPUT_FILE"; then
+    echo "Warning: Could not display output file metadata"
+fi
 echo ""
 
 echo "=========================================="
@@ -72,8 +76,12 @@ echo "=========================================="
 echo ""
 
 # Check for audio tracks
-SOURCE_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$SOURCE_FILE")
-OUTPUT_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$OUTPUT_FILE")
+SOURCE_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$SOURCE_FILE" 2>/dev/null || echo "0")
+OUTPUT_AUDIO_COUNT=$(mediainfo --Inform="General;%AudioCount%" "$OUTPUT_FILE" 2>/dev/null || echo "0")
+
+# Ensure counts are valid numbers
+SOURCE_AUDIO_COUNT="${SOURCE_AUDIO_COUNT:-0}"
+OUTPUT_AUDIO_COUNT="${OUTPUT_AUDIO_COUNT:-0}"
 
 echo "Source Audio Tracks: ${SOURCE_AUDIO_COUNT:-0}"
 echo "Output Audio Tracks: ${OUTPUT_AUDIO_COUNT:-0}"
