@@ -2,7 +2,7 @@
 // Muxer と FileSystemWritableFileStreamTarget は index.html で window.Mp4MuxerClasses に設定される
 
 // onProgress の呼び出し形式: onProgress({ stage, percent, fps, elapsedMs })
-// stage: 'reading', 'encoding', 'flushing', 'finalizing'
+// stage: 'encoding' (読み込み&エンコード)
 
 export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('encodeToFile started');
@@ -28,6 +28,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     let encodedVideoUs = 0;
     let videoBaseTsUs = null;
     let audioBaseTsUs = null;
+    let muxerInitialized = false;
 
     const videoEncoder = new VideoEncoder({
         output: (chunk, meta) => {
@@ -41,7 +42,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                     isKeyFrame: chunk.type === 'key'
                 });
             }
-            if (muxer) {
+            if (muxerInitialized && muxer) {
                 // ⚠️ mp4-muxerは「ミリ秒」単位のタイムスタンプを期待（マイクロ秒ではない）
                 const tsUs = Number(chunk.timestamp) || 0;
                 const durUs = Number(chunk.duration) || 0;
@@ -102,8 +103,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
         error: (e) => console.error('VideoEncoder error', e)
     });
 
-    // VideoEncoderは仮の設定で初期化（後で再設定）
-    // codec: Level 5.0 (avc1.640028) で1920x1200をサポート
+    // VideoEncoderは初期設定（実際の設定は後でonReadyコールバック内で行う）
     videoEncoder.configure({
         codec: config.video.codec ?? 'avc1.640028',
         width: config.video.width,
@@ -181,137 +181,121 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
         error: (e) => console.error('AudioDecoder error', e)
     }) : null;
 
-    // ===== STEP 1: ファイル形式を先に検出（Muxer 初期化前）=====
-    console.log('STEP 1: Detecting format...');
-    const detectedFormat = await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
-        const percent = pct; // 0-100%
-        onProgress({ stage: 'reading', percent, fps: undefined, elapsedMs: performance.now() - start });
-    });
-    console.log('Detected format:', detectedFormat);
+    // ===== SINGLE-PASS ENCODING: Format detection and encoding in one pass =====
+    console.log('Starting single-pass encoding with format detection...');
+    onProgress({ stage: 'encoding', percent: 0, fps: 0, elapsedMs: 0 });
 
-    // エンコード段階に移行
-    onProgress({ stage: 'encoding', percent: 0, fps: 0, elapsedMs: performance.now() - start });
-    totalVideoDurationUs = Number(detectedFormat.video?.durationUs) || 0;
-    console.log('Encoding stage started. Total duration:', totalVideoDurationUs, 'us');
+    // onReady callback: 初期化処理（Muxer, AudioEncoder）
+    const onReady = async (detectedFormat) => {
+        console.log('onReady callback fired with format:', detectedFormat);
+        
+        totalVideoDurationUs = Number(detectedFormat.video?.durationUs) || 0;
+        console.log('Total video duration:', totalVideoDurationUs, 'us');
 
-    // 検出された実際の解像度で encoder/muxer を設定
-    let actualWidth = detectedFormat.video?.width || config.video.width;
-    let actualHeight = detectedFormat.video?.height || config.video.height;
+        // 検出された実際の解像度で encoder/muxer を設定
+        let actualWidth = detectedFormat.video?.width || config.video.width;
+        let actualHeight = detectedFormat.video?.height || config.video.height;
 
-    console.log('Resolution check: width=', actualWidth, 'height=', actualHeight, 'pixels=', actualWidth * actualHeight);
+        console.log('Resolution check: width=', actualWidth, 'height=', actualHeight, 'pixels=', actualWidth * actualHeight);
 
-    // AVC Level 5.0制限: 最大2228224ピクセル
-    const maxPixels = 2228224;
-    if (actualWidth * actualHeight > maxPixels) {
-        console.log('Resolution exceeds AVC Level 5.0 limit, normalizing to 1920x1080');
-        actualWidth = 1920;
-        actualHeight = 1080;
-    }
+        // AVC Level 5.0制限: 最大2228224ピクセル
+        const maxPixels = 2228224;
+        if (actualWidth * actualHeight > maxPixels) {
+            console.log('Resolution exceeds AVC Level 5.0 limit, normalizing to 1920x1080');
+            actualWidth = 1920;
+            actualHeight = 1080;
+        }
 
-    // ===== STEP 2: VideoEncoder 再設定 =====
-    console.log('\n🎬 STEP 2: VideoEncoder configuration');
-    console.log(`  Input video format: ${detectedFormat.video.width}x${detectedFormat.video.height}`);
-    console.log(`  Encoder will be configured as: ${actualWidth}x${actualHeight}`);
-    if (detectedFormat.video.width !== actualWidth || detectedFormat.video.height !== actualHeight) {
-        console.warn(`  ⚠️  RESOLUTION WILL BE CHANGED: ${detectedFormat.video.width}x${detectedFormat.video.height} → ${actualWidth}x${actualHeight}`);
-    }
+        // ===== VideoEncoder 再設定 =====
+        console.log('\n🎬 VideoEncoder re-configuration');
+        console.log(`  Input video format: ${detectedFormat.video.width}x${detectedFormat.video.height}`);
+        console.log(`  Encoder will be configured as: ${actualWidth}x${actualHeight}`);
+        if (detectedFormat.video.width !== actualWidth || detectedFormat.video.height !== actualHeight) {
+            console.warn(`  ⚠️  RESOLUTION WILL BE CHANGED: ${detectedFormat.video.width}x${detectedFormat.video.height} → ${actualWidth}x${actualHeight}`);
+        }
 
-    // 1回目のエンコードキューをクリア
-    await videoEncoder.flush();
-    console.log('✅ VideoEncoder flushed (1st pass queue cleared)');
-
-    videoEncoder.configure({
-        codec: config.video.codec ?? 'avc1.640028',
-        width: actualWidth,
-        height: actualHeight,
-        bitrate: config.video.bitrate,
-        framerate: config.video.framerate,
-        latencyMode: 'quality',
-        avc: { format: 'avc' }
-    });
-    console.log('✅ VideoEncoder configured:', { width: actualWidth, height: actualHeight });
-
-    // ===== STEP 3: Muxer 初期化（エンコード開始前に必須）=====
-    console.log('STEP 3: Initializing Muxer BEFORE encoding starts...');
-    const { Muxer, FileSystemWritableFileStreamTarget } = window.Mp4MuxerClasses;
-    muxer = new Muxer({
-        target: new FileSystemWritableFileStreamTarget(fileStream),
-        video: { codec: 'avc', width: actualWidth, height: actualHeight },
-        audio: detectedFormat.audio && config.audio ? {
-            codec: 'aac',
-            sampleRate: detectedFormat.audio.sampleRate,
-            numberOfChannels: detectedFormat.audio.numberOfChannels
-        } : undefined,
-        fastStart: false
-    }, {
-        firstTimestampBehavior: 'remove'
-    });
-    console.log('Muxer initialized, ready for encoding');
-
-    // ===== STEP 4: AudioEncoder 初期化 =====
-    if (detectedFormat.audio && config.audio) {
-        audioEncoder = new AudioEncoder({
-            output: (chunk, meta) => {
-                audioChunkCount++;
-                if (audioChunkCount === 1) {
-                    console.log('First audio chunk received, size:', chunk.byteLength);
-                }
-                const ts = Number(meta?.timestamp) || 0;
-                if (audioBaseTsUs === null) audioBaseTsUs = ts;
-                const normalizedTs = Math.max(0, ts - audioBaseTsUs);
-                // 最初のオーディオチャンクは timestamp: 0 として指定
-                const finalTs = audioChunkCount === 1 ? 0 : normalizedTs;
-                const metaAdj = { ...meta, timestamp: finalTs };
-                try {
-                    muxer.addAudioChunk(chunk, metaAdj);
-                    audioChunkAddedCount++;
-                    if (audioChunkCount % 100 === 0) {
-                        console.log(`✓ Audio chunks added: ${audioChunkAddedCount}/${audioChunkCount}`);
-                    }
-                } catch (e) {
-                    console.error(`✗ Failed to add audio chunk #${audioChunkCount}:`, {
-                        message: e.message,
-                        timestamp: ts,
-                        normalizedTs: normalizedTs,
-                        full_error: e.toString()
-                    });
-                    if (!e.message?.includes('timestamp')) {
-                        throw e;
-                    }
-                }
-            },
-            error: (e) => {
-                console.error('AudioEncoder error', e);
-                audioEncoderClosed = true;
-            }
+        videoEncoder.configure({
+            codec: config.video.codec ?? 'avc1.640028',
+            width: actualWidth,
+            height: actualHeight,
+            bitrate: config.video.bitrate,
+            framerate: config.video.framerate,
+            latencyMode: 'quality',
+            avc: { format: 'avc' }
         });
+        console.log('✅ VideoEncoder configured:', { width: actualWidth, height: actualHeight });
 
-        audioEncoder.configure({
-            codec: config.audio.codec ?? 'mp4a.40.2',
-            sampleRate: detectedFormat.audio.sampleRate,
-            numberOfChannels: detectedFormat.audio.numberOfChannels,
-            bitrate: config.audio.bitrate
+        // ===== Muxer 初期化 =====
+        console.log('Initializing Muxer...');
+        const { Muxer, FileSystemWritableFileStreamTarget } = window.Mp4MuxerClasses;
+        muxer = new Muxer({
+            target: new FileSystemWritableFileStreamTarget(fileStream),
+            video: { codec: 'avc', width: actualWidth, height: actualHeight },
+            audio: detectedFormat.audio && config.audio ? {
+                codec: 'aac',
+                sampleRate: detectedFormat.audio.sampleRate,
+                numberOfChannels: detectedFormat.audio.numberOfChannels
+            } : undefined,
+            fastStart: false
+        }, {
+            firstTimestampBehavior: 'remove'
         });
-        console.log('AudioEncoder configured with detected format:', detectedFormat.audio);
-    }
+        muxerInitialized = true;
+        console.log('Muxer initialized and ready for chunks');
 
-    // ===== STEP 5: 実際にエンコーディング実行（フォーマット検出済み、Muxer 初期化済み）=====
-    console.log('STEP 5: Starting actual encoding with muxer initialized...');
+        // ===== AudioEncoder 初期化 =====
+        if (detectedFormat.audio && config.audio) {
+            audioEncoder = new AudioEncoder({
+                output: (chunk, meta) => {
+                    audioChunkCount++;
+                    if (audioChunkCount === 1) {
+                        console.log('First audio chunk received, size:', chunk.byteLength);
+                    }
+                    const ts = Number(meta?.timestamp) || 0;
+                    if (audioBaseTsUs === null) audioBaseTsUs = ts;
+                    const normalizedTs = Math.max(0, ts - audioBaseTsUs);
+                    // 最初のオーディオチャンクは timestamp: 0 として指定
+                    const finalTs = audioChunkCount === 1 ? 0 : normalizedTs;
+                    const metaAdj = { ...meta, timestamp: finalTs };
+                    try {
+                        muxer.addAudioChunk(chunk, metaAdj);
+                        audioChunkAddedCount++;
+                        if (audioChunkCount % 100 === 0) {
+                            console.log(`✓ Audio chunks added: ${audioChunkAddedCount}/${audioChunkCount}`);
+                        }
+                    } catch (e) {
+                        console.error(`✗ Failed to add audio chunk #${audioChunkCount}:`, {
+                            message: e.message,
+                            timestamp: ts,
+                            normalizedTs: normalizedTs,
+                            full_error: e.toString()
+                        });
+                        if (!e.message?.includes('timestamp')) {
+                            throw e;
+                        }
+                    }
+                },
+                error: (e) => {
+                    console.error('AudioEncoder error', e);
+                    audioEncoderClosed = true;
+                }
+            });
 
-    // ⚠️ 重要：2回目のエンコード前にカウンターをリセット
-    frameCount = 0;
-    videoChunkCount = 0;
-    audioChunkCount = 0;
-    videoChunkAddedCount = 0;
-    audioChunkAddedCount = 0;
-    videoBaseTsUs = null;
-    audioBaseTsUs = null;
-    console.log('✅ Counters reset for second encoding pass');
+            audioEncoder.configure({
+                codec: config.audio.codec ?? 'mp4a.40.2',
+                sampleRate: detectedFormat.audio.sampleRate,
+                numberOfChannels: detectedFormat.audio.numberOfChannels,
+                bitrate: config.audio.bitrate
+            });
+            console.log('AudioEncoder configured with detected format:', detectedFormat.audio);
+        }
+    };
 
+    // 単一パスでエンコード（onReadyコールバックで初期化）
     await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
         const percent = pct;
         onProgress({ stage: 'encoding', percent, fps: undefined, elapsedMs: performance.now() - start });
-    });
+    }, onReady);
 
     console.log('\n' + '='.repeat(70));
     console.log('📊 ENCODING SUMMARY:');
@@ -324,13 +308,13 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
         console.error('\n❌ CRITICAL: NO video chunks added to muxer!');
         console.error('   Investigating causes:');
         console.error('   - Muxer initialization failed?');
-        console.error('   - Resolution mismatch? (input: 1920x1200 vs muxer: 1920x1080?)');
+        console.error('   - Resolution mismatch?');
         console.error('   - All chunks were delta frames (no key frame)?');
     }
     console.log('='.repeat(70) + '\n');
 
     console.log('Flushing encoders...');
-    onProgress({ stage: 'flushing', percent: 0, fps: undefined, elapsedMs: performance.now() - start });
+    onProgress({ stage: 'encoding', percent: 100, fps: undefined, elapsedMs: performance.now() - start });
     console.log('Total frames decoded:', frameCount);
     console.log('Total video chunks encoded:', videoChunkCount);
     console.log('Total video chunks added to muxer:', videoChunkAddedCount);
@@ -339,15 +323,12 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
 
     await videoEncoder.flush();
     if (audioEncoder) await audioEncoder.flush();
-    onProgress({ stage: 'flushing', percent: 50, fps: undefined, elapsedMs: performance.now() - start });
 
     console.log('Finalizing muxer...');
     muxer.finalize();
-    onProgress({ stage: 'finalizing', percent: 50, fps: undefined, elapsedMs: performance.now() - start });
 
     console.log('Closing file stream...');
     await fileStream.close();
-    onProgress({ stage: 'finalizing', percent: 100, fps: undefined, elapsedMs: performance.now() - start });
 
     console.log('Encode complete!');
 }

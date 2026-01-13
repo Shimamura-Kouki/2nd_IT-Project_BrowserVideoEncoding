@@ -58,7 +58,7 @@ export async function getFileInfo(file) {
     });
 }
 
-export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgress) {
+export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgress, onReady) {
     return new Promise((resolve, reject) => {
         const mp4boxfile = window.MP4Box.createFile();
         let videoTrackId = null;
@@ -66,8 +66,9 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
         let detectedAudioFormat = null;
         let detectedVideoFormat = null;
         let lastVideoTimestampUs = 0; // 入力動画の総デュレーション算定用（マイクロ秒）
+        let readyCallbackFired = false;
 
-        mp4boxfile.onReady = (info) => {
+        mp4boxfile.onReady = async (info) => {
             const videoTrack = info.videoTracks?.[0];
             if (videoTrack) {
                 videoTrackId = videoTrack.id;
@@ -97,6 +98,23 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                 };
                 audioDecoder.configure(detectedAudioFormat);
                 mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
+            }
+
+            // onReadyコールバックを呼び出し（フォーマット検出情報を渡す）
+            if (onReady && !readyCallbackFired) {
+                readyCallbackFired = true;
+                const formatInfo = {
+                    video: detectedVideoFormat,
+                    audio: detectedAudioFormat
+                };
+                console.log('Calling onReady callback with format:', formatInfo);
+                try {
+                    await onReady(formatInfo);
+                } catch (err) {
+                    console.error('onReady callback failed:', err);
+                    reject(err);
+                    return;
+                }
             }
 
             mp4boxfile.start();
