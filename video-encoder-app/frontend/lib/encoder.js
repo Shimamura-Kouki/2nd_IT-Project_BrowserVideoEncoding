@@ -253,25 +253,41 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             output: (chunk, meta) => {
                 audioChunkCount++;
                 if (audioChunkCount === 1) {
-                    console.log('First audio chunk received, size:', chunk.byteLength);
+                    console.log('🎵 FIRST AUDIO CHUNK:', {
+                        size: chunk.byteLength,
+                        timestamp: chunk.timestamp,
+                        duration: chunk.duration
+                    });
                 }
-                const ts = Number(meta?.timestamp) || 0;
-                if (audioBaseTsUs === null) audioBaseTsUs = ts;
-                const normalizedTs = Math.max(0, ts - audioBaseTsUs);
-                // 最初のオーディオチャンクは timestamp: 0 として指定
-                const finalTs = audioChunkCount === 1 ? 0 : normalizedTs;
-                const metaAdj = { ...meta, timestamp: finalTs };
+                // ⚠️ mp4-muxerは「ミリ秒」単位のタイムスタンプを期待（マイクロ秒ではない）
+                const tsUs = Number(chunk.timestamp) || 0;
+                const durUs = Number(chunk.duration) || 0;
+                
+                if (audioBaseTsUs === null) {
+                    audioBaseTsUs = tsUs;
+                    console.log('audioBaseTsUs initialized:', audioBaseTsUs);
+                }
+                const normalizedTsUs = Math.max(0, tsUs - audioBaseTsUs);
+                
                 try {
+                    // マイクロ秒 → ミリ秒に変換（mp4-muxer要件）
+                    const finalTsMs = normalizedTsUs / 1000;
+                    const durationMs = durUs / 1000;
+                    
+                    if (audioChunkCount <= 3 || audioChunkCount % 100 === 0) {
+                        console.log(`[AUDIO CHUNK ${audioChunkCount}] ts: ${finalTsMs.toFixed(2)}ms, dur: ${durationMs.toFixed(2)}ms`);
+                    }
+                    
+                    // timestamp/durationをミリ秒に変換して渡す
+                    const metaAdj = { ...meta, timestamp: finalTsMs, duration: durationMs };
                     muxer.addAudioChunk(chunk, metaAdj);
                     audioChunkAddedCount++;
-                    if (audioChunkCount % 100 === 0) {
-                        console.log(`✓ Audio chunks added: ${audioChunkAddedCount}/${audioChunkCount}`);
-                    }
                 } catch (e) {
                     console.error(`✗ Failed to add audio chunk #${audioChunkCount}:`, {
                         message: e.message,
-                        timestamp: ts,
-                        normalizedTs: normalizedTs,
+                        timestamp: tsUs,
+                        normalizedTsUs: normalizedTsUs,
+                        duration: durUs,
                         full_error: e.toString()
                     });
                     if (!e.message?.includes('timestamp')) {
