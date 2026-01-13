@@ -189,9 +189,9 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     });
     console.log('Detected format:', detectedFormat);
 
-    // エンコード段階に移行（読み込みステージとして開始）
+    // 検出されたフォーマット情報を保存
     totalVideoDurationUs = Number(detectedFormat.video?.durationUs) || 0;
-    console.log('Encoding stage started. Total duration:', totalVideoDurationUs, 'us');
+    console.log('Format detection complete. Total duration:', totalVideoDurationUs, 'us');
 
     // 検出された実際の解像度で encoder/muxer を設定
     let actualWidth = detectedFormat.video?.width || config.video.width;
