@@ -72,11 +72,16 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
             const videoTrack = info.videoTracks?.[0];
             if (videoTrack) {
                 videoTrackId = videoTrack.id;
+                // Calculate duration from info object (in microseconds)
+                // info.duration is in the movie timescale
+                const durationUs = info.duration && info.timescale ? 
+                    Math.round(1e6 * info.duration / info.timescale) : 0;
                 detectedVideoFormat = {
                     width: videoTrack.video.width,
                     height: videoTrack.video.height,
-                    durationUs: 0  // 後でonSamplesの最終値で更新される
+                    durationUs: durationUs  // 動画全体の長さ（マイクロ秒）
                 };
+                console.log('Video format detected:', detectedVideoFormat);
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);
                 videoDecoder.configure({
