@@ -37,6 +37,6 @@ echo "Success! Metadata exported to: $OUTPUT_FILE"
 echo ""
 echo "Summary:"
 SUMMARY_LINES=20
-if ! mediainfo "$INPUT_FILE" | grep -E "^(General|Video|Audio)" | head -${SUMMARY_LINES}; then
+if ! mediainfo "$INPUT_FILE" | grep -E "^(General|Video|Audio)" | head -"${SUMMARY_LINES}"; then
     echo "Warning: Could not display summary"
 fi
