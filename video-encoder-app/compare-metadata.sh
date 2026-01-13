@@ -92,11 +92,11 @@ echo "Output Audio Tracks: $OUTPUT_AUDIO_COUNT"
 echo ""
 
 if [ "$SOURCE_AUDIO_COUNT" -eq 0 ] && [ "$OUTPUT_AUDIO_COUNT" -eq 0 ]; then
-    echo "✓ PASS: Both files have no audio track (video-only encoding worked correctly)"
+    echo "✓ PASS: Both files have no audio tracks (video-only encoding worked correctly)"
 elif [ "$SOURCE_AUDIO_COUNT" -ne 0 ] && [ "$OUTPUT_AUDIO_COUNT" -ne 0 ]; then
     echo "✓ PASS: Both files have audio tracks"
 elif [ "$SOURCE_AUDIO_COUNT" -eq 0 ] && [ "$OUTPUT_AUDIO_COUNT" -ne 0 ]; then
-    echo "✗ FAIL: Output has audio track but source doesn't (unexpected empty audio track)"
+    echo "✗ FAIL: Output has audio tracks but source doesn't (unexpected empty audio track)"
 elif [ "$SOURCE_AUDIO_COUNT" -ne 0 ] && [ "$OUTPUT_AUDIO_COUNT" -eq 0 ]; then
     echo "⚠ WARNING: Source has audio but output doesn't (audio was not encoded)"
 fi
