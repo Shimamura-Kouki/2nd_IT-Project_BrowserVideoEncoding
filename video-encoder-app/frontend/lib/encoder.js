@@ -240,8 +240,9 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
         }, {
             firstTimestampBehavior: 'remove'
         });
-        muxerInitialized = true;
         console.log('Muxer initialized and ready for chunks');
+        // Set flag AFTER muxer is fully initialized
+        muxerInitialized = true;
 
         // ===== AudioEncoder 初期化 =====
         if (detectedFormat.audio && config.audio) {
