@@ -73,7 +73,8 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                 videoTrackId = videoTrack.id;
                 detectedVideoFormat = {
                     width: videoTrack.video.width,
-                    height: videoTrack.video.height
+                    height: videoTrack.video.height,
+                    durationUs: 0  // 後でonSamplesの最終値で更新される
                 };
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);
@@ -108,6 +109,8 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                     const durUs = Math.round(1e6 * sample.duration / sample.timescale);
                     // 総デュレーション算出のため、最後のタイムスタンプ+継続時間を更新
                     lastVideoTimestampUs = Math.max(lastVideoTimestampUs, tsUs + durUs);
+                    // detectedVideoFormatの durationUs を実時間更新（エンコーダーで読める様に）
+                    if (detectedVideoFormat) detectedVideoFormat.durationUs = lastVideoTimestampUs;
                     const chunk = new EncodedVideoChunk({
                         type: sample.is_sync ? 'key' : 'delta',
                         timestamp: tsUs,
@@ -116,6 +119,7 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                     });
                     videoDecoder.decode(chunk);
                 }
+                console.log('demuxer: onSamples video, count:', samples.length, 'lastVideoTimestampUs:', lastVideoTimestampUs);
             } else if (track_id === audioTrackId) {
                 for (const sample of samples) {
                     const chunk = new EncodedAudioChunk({

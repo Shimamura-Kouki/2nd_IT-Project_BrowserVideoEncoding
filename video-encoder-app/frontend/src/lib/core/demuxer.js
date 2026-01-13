@@ -4,42 +4,50 @@ import MP4Box from 'mp4box';
  * 入力MP4を解析し、WebCodecsのデコーダへ供給する
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
- * @param {AudioDecoder} audioDecoder
+ * @param {AudioDecoder|null} audioDecoder
+ * @param {(hasAudio: boolean)=>void} onReady - Called when metadata is ready with audio availability info
  * @param {(pct:number)=>void} onProgress
+ * @returns {Promise<{hasAudio: boolean}>}
  */
-export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgress) {
-    const mp4boxfile = MP4Box.createFile();
-    let videoTrackId = null;
-    let audioTrackId = null;
+export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, onProgress) {
+    return new Promise((resolve, reject) => {
+        const mp4boxfile = MP4Box.createFile();
+        let videoTrackId = null;
+        let audioTrackId = null;
+        let hasAudio = false;
 
-    mp4boxfile.onReady = (info) => {
-        const videoTrack = info.videoTracks?.[0];
-        if (videoTrack) {
-            videoTrackId = videoTrack.id;
-            const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
-            const description = generateDescriptionBuffer(entry);
-            videoDecoder.configure({
-                codec: videoTrack.codec,
-                codedWidth: videoTrack.video.width,
-                codedHeight: videoTrack.video.height,
-                description
-            });
-            mp4boxfile.setExtractionOptions(videoTrackId, 'video', { nbSamples: 100 });
-        }
+        mp4boxfile.onReady = (info) => {
+            const videoTrack = info.videoTracks?.[0];
+            if (videoTrack) {
+                videoTrackId = videoTrack.id;
+                const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
+                const description = generateDescriptionBuffer(entry);
+                videoDecoder.configure({
+                    codec: videoTrack.codec,
+                    codedWidth: videoTrack.video.width,
+                    codedHeight: videoTrack.video.height,
+                    description
+                });
+                mp4boxfile.setExtractionOptions(videoTrackId, 'video', { nbSamples: 100 });
+            }
 
-        const audioTrack = info.audioTracks?.[0];
-        if (audioTrack) {
-            audioTrackId = audioTrack.id;
-            audioDecoder.configure({
-                codec: audioTrack.codec,
-                sampleRate: audioTrack.audio.sample_rate,
-                numberOfChannels: audioTrack.audio.channel_count
-            });
-            mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
-        }
+            const audioTrack = info.audioTracks?.[0];
+            if (audioTrack && audioDecoder) {
+                hasAudio = true;
+                audioTrackId = audioTrack.id;
+                audioDecoder.configure({
+                    codec: audioTrack.codec,
+                    sampleRate: audioTrack.audio.sample_rate,
+                    numberOfChannels: audioTrack.audio.channel_count
+                });
+                mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
+            }
 
-        mp4boxfile.start();
-    };
+            // Call the onReady callback to initialize encoders and muxer
+            onReady(hasAudio);
+
+            mp4boxfile.start();
+        };
 
     mp4boxfile.onSamples = (track_id, _user, samples) => {
         if (track_id === videoTrackId) {
@@ -79,7 +87,12 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
             readNextChunk();
         } else {
             mp4boxfile.flush();
+            resolve({ hasAudio });
         }
+    };
+
+    reader.onerror = () => {
+        reject(new Error('Failed to read file'));
     };
 
     function readNextChunk() {
@@ -88,6 +101,7 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
     }
 
     readNextChunk();
+    });
 }
 
 function generateDescriptionBuffer(entry) {

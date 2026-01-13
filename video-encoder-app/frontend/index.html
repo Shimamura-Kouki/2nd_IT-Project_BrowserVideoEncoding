@@ -234,11 +234,52 @@
 
         <div class="section progress-section" id="progressSection">
             <h2 style="font-size: 16px; margin-bottom: 12px;">処理中...</h2>
-            <div class="progress">
-                <div id="progressBar" style="width: 0%;"></div>
+
+            <!-- Reading Stage -->
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px;">
+                    📖 ファイル読み込み
+                    <span id="readingStatus" style="color: #999; font-weight: normal;">-</span>
+                </div>
+                <div class="progress">
+                    <div id="readingBar" style="width: 0%;"></div>
+                </div>
             </div>
+
+            <!-- Encoding Stage -->
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px;">
+                    🎬 エンコード
+                    <span id="encodingStatus" style="color: #999; font-weight: normal;">-</span>
+                </div>
+                <div class="progress">
+                    <div id="encodingBar" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <!-- Flushing Stage -->
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px;">
+                    💾 フラッシング
+                    <span id="flushingStatus" style="color: #999; font-weight: normal;">-</span>
+                </div>
+                <div class="progress">
+                    <div id="flushingBar" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <!-- Finalizing Stage -->
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px;">
+                    ✅ ファイナライズ
+                    <span id="finalizingStatus" style="color: #999; font-weight: normal;">-</span>
+                </div>
+                <div class="progress">
+                    <div id="finalizingBar" style="width: 0%;"></div>
+                </div>
+            </div>
+
             <div class="stats">
-                <div>進捗: <span id="progressPct">0</span>%</div>
                 <div>FPS: <span id="fps">-</span></div>
                 <div>経過時間: <span id="elapsed">0</span>秒</div>
             </div>
@@ -366,8 +407,10 @@
 
     <script type="module">
         import { Muxer, FileSystemWritableFileStreamTarget } from 'https://cdn.jsdelivr.net/npm/mp4-muxer@3.0.1/+esm';
-        import { demuxAndDecode } from './lib/demuxer.js';
-        import { encodeToFile } from './lib/encoder.js';
+
+        // Dynamic import で キャッシュバスティングを実装
+        const { demuxAndDecode } = await import(`./lib/demuxer.js?v=${Date.now()}`);
+        const { encodeToFile } = await import(`./lib/encoder.js?v=${Date.now()}`);
 
         // mp4-muxerをグローバルに設定
         window.Mp4MuxerClasses = { Muxer, FileSystemWritableFileStreamTarget };
@@ -388,17 +431,71 @@
             document.getElementById('encodeBtn').disabled = true;
             const startTime = performance.now();
 
+            // エンコード開始時に全バーをリセット
+            document.getElementById('readingBar').style.width = '0%';
+            document.getElementById('readingStatus').textContent = '-';
+            document.getElementById('encodingBar').style.width = '0%';
+            document.getElementById('encodingStatus').textContent = '-';
+            document.getElementById('flushingBar').style.width = '0%';
+            document.getElementById('flushingStatus').textContent = '-';
+            document.getElementById('finalizingBar').style.width = '0%';
+            document.getElementById('finalizingStatus').textContent = '-';
+            document.getElementById('fps').textContent = '-';
+            document.getElementById('elapsed').textContent = '0';
+
             try {
                 console.log('Starting encode process...');
-                await encodeToFile(selectedFile, config, (pct, stats) => {
-                    if (pct !== undefined) {
-                        document.getElementById('progressBar').style.width = pct + '%';
-                        document.getElementById('progressPct').textContent = Math.round(pct);
+                await encodeToFile(selectedFile, config, (progress) => {
+                    // progress = { stage, percent, fps, elapsedMs }
+                    const { stage, percent, fps, elapsedMs } = progress;
+
+                    // ステージに応じて該当バーを更新（該当ステージのみ）
+                    if (stage === 'reading') {
+                        const pct = Math.round(percent || 0);
+                        document.getElementById('readingBar').style.width = pct + '%';
+                        document.getElementById('readingStatus').textContent = pct + '%';
+                    } else if (stage === 'encoding') {
+                        // 読み込み完了を表示（一度だけ）
+                        if (document.getElementById('readingStatus').textContent !== '完了') {
+                            document.getElementById('readingBar').style.width = '100%';
+                            document.getElementById('readingStatus').textContent = '完了';
+                        }
+                        const pct = Math.round(percent || 0);
+                        document.getElementById('encodingBar').style.width = pct + '%';
+                        document.getElementById('encodingStatus').textContent = pct + '%';
+                    } else if (stage === 'flushing') {
+                        // 読み込みとエンコード完了を表示（一度だけ）
+                        if (document.getElementById('encodingStatus').textContent !== '完了') {
+                            document.getElementById('readingBar').style.width = '100%';
+                            document.getElementById('readingStatus').textContent = '完了';
+                            document.getElementById('encodingBar').style.width = '100%';
+                            document.getElementById('encodingStatus').textContent = '完了';
+                        }
+                        const pct = Math.round(percent || 0);
+                        document.getElementById('flushingBar').style.width = pct + '%';
+                        document.getElementById('flushingStatus').textContent = pct + '%';
+                    } else if (stage === 'finalizing') {
+                        // 読み込み、エンコード、フラッシング完了を表示（一度だけ）
+                        if (document.getElementById('flushingStatus').textContent !== '完了') {
+                            document.getElementById('readingBar').style.width = '100%';
+                            document.getElementById('readingStatus').textContent = '完了';
+                            document.getElementById('encodingBar').style.width = '100%';
+                            document.getElementById('encodingStatus').textContent = '完了';
+                            document.getElementById('flushingBar').style.width = '100%';
+                            document.getElementById('flushingStatus').textContent = '完了';
+                        }
+                        const pct = Math.round(percent || 0);
+                        document.getElementById('finalizingBar').style.width = pct + '%';
+                        document.getElementById('finalizingStatus').textContent = pct + '%';
                     }
-                    if (stats) {
-                        const fpsVal = Number(stats.fps);
-                        const elapsedSec = Number(stats.elapsedMs) / 1000;
+
+                    // FPSと経過時間を更新（毎回）
+                    if (fps !== undefined) {
+                        const fpsVal = Number(fps);
                         document.getElementById('fps').textContent = Number.isFinite(fpsVal) ? fpsVal.toFixed(1) : '-';
+                    }
+                    if (elapsedMs !== undefined) {
+                        const elapsedSec = Number(elapsedMs) / 1000;
                         document.getElementById('elapsed').textContent = Number.isFinite(elapsedSec) ? elapsedSec.toFixed(1) : '-';
                     }
                 }, demuxAndDecode);
