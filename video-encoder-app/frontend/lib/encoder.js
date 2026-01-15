@@ -29,6 +29,14 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     let videoBaseTsUs = null;
     let audioBaseTsUs = null;
     let muxerInitialized = false;
+    
+    // Track expected frame count and completion
+    let expectedFrameCount = 0;
+    let encodingComplete = null;
+    let encodingCompleted = false;
+    const encodingCompletePromise = new Promise((resolve) => {
+        encodingComplete = resolve;
+    });
 
     const videoEncoder = new VideoEncoder({
         output: (chunk, meta) => {
@@ -98,6 +106,15 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 onProgress({ stage: 'encoding', percent: encPercent, fps: undefined, elapsedMs: performance.now() - start });
             } else if (videoChunkCount === 1) {
                 console.log('Warning: totalVideoDurationUs is', totalVideoDurationUs);
+            }
+            
+            // Check if all expected chunks have been encoded
+            // Note: expectedFrameCount > 0 guard prevents premature resolution if chunks arrive
+            // before expectedFrameCount is set (after demuxAndDecode completes)
+            if (expectedFrameCount > 0 && videoChunkCount >= expectedFrameCount && !encodingCompleted) {
+                console.log('All expected video chunks encoded:', videoChunkCount, '/', expectedFrameCount);
+                encodingCompleted = true;
+                encodingComplete();
             }
         },
         error: (e) => console.error('VideoEncoder error', e)
@@ -293,10 +310,25 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     };
 
     // 単一パスでエンコード（onReadyコールバックで初期化）
-    await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
+    const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
         const percent = pct;
         onProgress({ stage: 'encoding', percent, fps: undefined, elapsedMs: performance.now() - start });
     }, onReady);
+    
+    // Set expected frame count from demuxer result
+    expectedFrameCount = demuxResult?.video?.sampleCount || 0;
+    console.log('Expected video frames from demuxer:', expectedFrameCount);
+    
+    // Check if encoding is already complete or resolve immediately if no frames expected
+    if (expectedFrameCount === 0 || videoChunkCount >= expectedFrameCount) {
+        if (expectedFrameCount === 0) {
+            console.log('No video frames expected, resolving encoding promise');
+        } else {
+            console.log('All chunks already encoded before check:', videoChunkCount, '/', expectedFrameCount);
+        }
+        encodingCompleted = true;
+        encodingComplete();
+    }
 
     console.log('\n' + '='.repeat(70));
     console.log('📊 ENCODING SUMMARY:');
@@ -324,6 +356,18 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
 
     await videoEncoder.flush();
     if (audioEncoder) await audioEncoder.flush();
+    
+    // Wait for all encoded chunks to be processed
+    console.log('Waiting for all video chunks to be encoded...');
+    if (expectedFrameCount > 0 && videoChunkCount < expectedFrameCount) {
+        console.log(`Still waiting for chunks: ${videoChunkCount}/${expectedFrameCount}`);
+        await encodingCompletePromise;
+        console.log('All video chunks have been encoded');
+    } else if (expectedFrameCount > 0) {
+        console.log('All expected chunks already encoded');
+    } else {
+        console.warn('No expected frame count available, proceeding without waiting');
+    }
 
     console.log('Finalizing muxer...');
     muxer.finalize();
