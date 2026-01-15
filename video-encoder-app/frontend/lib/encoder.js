@@ -363,8 +363,11 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('Waiting for all video chunks to be encoded...');
     if (expectedFrameCount > 0 && videoChunkCount < expectedFrameCount) {
         console.log(`Still waiting for chunks: ${videoChunkCount}/${expectedFrameCount}`);
+        console.log(`Current state - Frames decoded: ${frameCount}, Chunks encoded: ${videoChunkCount}, Chunks added to muxer: ${videoChunkAddedCount}`);
+        
         await encodingCompletePromise;
         console.log('All video chunks have been encoded');
+        console.log(`Final state - Frames decoded: ${frameCount}, Chunks encoded: ${videoChunkCount}, Chunks added to muxer: ${videoChunkAddedCount}`);
     } else if (expectedFrameCount > 0) {
         console.log('All expected chunks already encoded');
     } else {
