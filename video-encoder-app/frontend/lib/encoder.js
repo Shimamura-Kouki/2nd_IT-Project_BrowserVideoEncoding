@@ -354,8 +354,10 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('Total audio chunks encoded:', audioChunkCount);
     console.log('Total audio chunks added to muxer:', audioChunkAddedCount);
 
+    console.log('Before encoder flush - frames decoded:', frameCount, 'chunks encoded:', videoChunkCount);
     await videoEncoder.flush();
     if (audioEncoder) await audioEncoder.flush();
+    console.log('After encoder flush - frames decoded:', frameCount, 'chunks encoded:', videoChunkCount);
     
     // Wait for all encoded chunks to be processed
     console.log('Waiting for all video chunks to be encoded...');
