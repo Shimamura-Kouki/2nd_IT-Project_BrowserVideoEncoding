@@ -109,6 +109,8 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             }
             
             // Check if all expected chunks have been encoded
+            // Note: expectedFrameCount > 0 guard prevents premature resolution if chunks arrive
+            // before expectedFrameCount is set (after demuxAndDecode completes)
             if (expectedFrameCount > 0 && videoChunkCount >= expectedFrameCount && !encodingCompleted) {
                 console.log('All expected video chunks encoded:', videoChunkCount, '/', expectedFrameCount);
                 encodingCompleted = true;
