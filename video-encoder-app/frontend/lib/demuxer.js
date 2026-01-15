@@ -70,6 +70,7 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
         let detectedVideoFormat = null;
         let lastVideoTimestampUs = 0; // 入力動画の総デュレーション算定用（マイクロ秒）
         let readyCallbackFired = false;
+        let totalVideoSamples = 0; // Track total video samples decoded
 
         mp4boxfile.onReady = async (info) => {
             const videoTrack = info.videoTracks?.[0];
@@ -144,8 +145,9 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                         data: sample.data
                     });
                     videoDecoder.decode(chunk);
+                    totalVideoSamples++; // Count each video sample
                 }
-                console.log('demuxer: onSamples video, count:', samples.length, 'lastVideoTimestampUs:', lastVideoTimestampUs);
+                console.log('demuxer: onSamples video, count:', samples.length, 'total so far:', totalVideoSamples, 'lastVideoTimestampUs:', lastVideoTimestampUs);
             } else if (track_id === audioTrackId) {
                 for (const sample of samples) {
                     const chunk = new EncodedAudioChunk({
@@ -180,9 +182,9 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                     videoDecoder.flush(),
                     audioDecoder ? audioDecoder.flush() : Promise.resolve()
                 ]).then(() => {
-                    console.log('demuxAndDecode: decoders flushed, resolving promise');
+                    console.log('demuxAndDecode: decoders flushed, total video samples:', totalVideoSamples);
                     resolve({
-                        video: detectedVideoFormat ? { ...detectedVideoFormat, durationUs: lastVideoTimestampUs } : null,
+                        video: detectedVideoFormat ? { ...detectedVideoFormat, durationUs: lastVideoTimestampUs, sampleCount: totalVideoSamples } : null,
                         audio: detectedAudioFormat
                     });
                 }).catch(reject);
