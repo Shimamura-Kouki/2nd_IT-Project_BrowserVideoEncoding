@@ -1,6 +1,9 @@
 // Demuxer: mp4box を使って入力MP4を解析し、デコーダへ供給
 // MP4Box はCDNからグローバル変数として読み込まれる
 
+// 定数
+const MICROSECONDS_PER_SECOND = 1e6;
+
 // ファイルのメタデータ（音声/映像フォーマット）を事前取得
 export async function getFileInfo(file) {
     return new Promise((resolve, reject) => {
@@ -58,7 +61,7 @@ export async function getFileInfo(file) {
     });
 }
 
-export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgress) {
+export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgress, onReady) {
     return new Promise((resolve, reject) => {
         const mp4boxfile = window.MP4Box.createFile();
         let videoTrackId = null;
@@ -66,16 +69,22 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
         let detectedAudioFormat = null;
         let detectedVideoFormat = null;
         let lastVideoTimestampUs = 0; // 入力動画の総デュレーション算定用（マイクロ秒）
+        let readyCallbackFired = false;
 
-        mp4boxfile.onReady = (info) => {
+        mp4boxfile.onReady = async (info) => {
             const videoTrack = info.videoTracks?.[0];
             if (videoTrack) {
                 videoTrackId = videoTrack.id;
+                // Calculate duration from info object (in microseconds)
+                // info.duration is in the movie timescale
+                const durationUs = info.duration && info.timescale ? 
+                    Math.round(MICROSECONDS_PER_SECOND * info.duration / info.timescale) : 0;
                 detectedVideoFormat = {
                     width: videoTrack.video.width,
                     height: videoTrack.video.height,
-                    durationUs: 0  // 後でonSamplesの最終値で更新される
+                    durationUs: durationUs  // 動画全体の長さ（マイクロ秒）
                 };
+                console.log('Video format detected:', detectedVideoFormat);
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);
                 videoDecoder.configure({
@@ -99,14 +108,31 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                 mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
             }
 
+            // onReadyコールバックを呼び出し（フォーマット検出情報を渡す）
+            if (onReady && !readyCallbackFired) {
+                readyCallbackFired = true;
+                const formatInfo = {
+                    video: detectedVideoFormat,
+                    audio: detectedAudioFormat
+                };
+                console.log('Calling onReady callback with format:', formatInfo);
+                try {
+                    await onReady(formatInfo);
+                } catch (err) {
+                    console.error('onReady callback failed:', err);
+                    reject(err);
+                    return;
+                }
+            }
+
             mp4boxfile.start();
         };
 
         mp4boxfile.onSamples = (track_id, _user, samples) => {
             if (track_id === videoTrackId) {
                 for (const sample of samples) {
-                    const tsUs = Math.round(1e6 * sample.cts / sample.timescale);
-                    const durUs = Math.round(1e6 * sample.duration / sample.timescale);
+                    const tsUs = Math.round(MICROSECONDS_PER_SECOND * sample.cts / sample.timescale);
+                    const durUs = Math.round(MICROSECONDS_PER_SECOND * sample.duration / sample.timescale);
                     // 総デュレーション算出のため、最後のタイムスタンプ+継続時間を更新
                     lastVideoTimestampUs = Math.max(lastVideoTimestampUs, tsUs + durUs);
                     // detectedVideoFormatの durationUs を実時間更新（エンコーダーで読める様に）
@@ -124,8 +150,8 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                 for (const sample of samples) {
                     const chunk = new EncodedAudioChunk({
                         type: 'key',
-                        timestamp: Math.round(1e6 * sample.cts / sample.timescale),
-                        duration: Math.round(1e6 * sample.duration / sample.timescale),
+                        timestamp: Math.round(MICROSECONDS_PER_SECOND * sample.cts / sample.timescale),
+                        duration: Math.round(MICROSECONDS_PER_SECOND * sample.duration / sample.timescale),
                         data: sample.data
                     });
                     audioDecoder.decode(chunk);
