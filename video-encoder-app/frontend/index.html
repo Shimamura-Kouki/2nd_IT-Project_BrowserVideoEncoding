@@ -235,10 +235,21 @@
         <div class="section progress-section" id="progressSection">
             <h2 style="font-size: 16px; margin-bottom: 12px;">処理中...</h2>
 
-            <!-- Encoding Stage (読み込み&エンコード) -->
+            <!-- Demuxing Stage (ファイル読み込み&デマックス) -->
             <div style="margin-bottom: 16px;">
                 <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px;">
-                    🎬 読み込み&エンコード
+                    📂 ファイル読み込み&解析
+                    <span id="demuxingStatus" style="color: #999; font-weight: normal;">-</span>
+                </div>
+                <div class="progress">
+                    <div id="demuxingBar" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <!-- Encoding Stage (エンコード) -->
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px;">
+                    🎬 エンコード
                     <span id="encodingStatus" style="color: #999; font-weight: normal;">-</span>
                 </div>
                 <div class="progress">
@@ -399,6 +410,8 @@
             const startTime = performance.now();
 
             // エンコード開始時にバーをリセット
+            document.getElementById('demuxingBar').style.width = '0%';
+            document.getElementById('demuxingStatus').textContent = '0%';
             document.getElementById('encodingBar').style.width = '0%';
             document.getElementById('encodingStatus').textContent = '0%';
             document.getElementById('fps').textContent = '-';
@@ -409,6 +422,13 @@
                 await encodeToFile(selectedFile, config, (progress) => {
                     // progress = { stage, percent, fps, elapsedMs }
                     const { stage, percent, fps, elapsedMs } = progress;
+
+                    // デマックス進捗を更新
+                    if (stage === 'demuxing' && percent !== undefined) {
+                        const pct = Math.round(percent || 0);
+                        document.getElementById('demuxingBar').style.width = pct + '%';
+                        document.getElementById('demuxingStatus').textContent = pct === 100 ? '完了' : pct + '%';
+                    }
 
                     // エンコード進捗を更新
                     if (stage === 'encoding' && percent !== undefined) {
