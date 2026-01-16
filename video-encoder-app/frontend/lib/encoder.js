@@ -4,6 +4,19 @@
 // onProgress の呼び出し形式: onProgress({ stage, percent, fps, elapsedMs })
 // stage: 'demuxing' (ファイル読み込み&デマックス), 'encoding' (エンコード)
 
+// H.264 コーデックレベルの定数
+const H264_MACROBLOCK_SIZE = 16; // H.264のマクロブロックサイズ
+const AVC_LEVEL_3_1_MAX_PIXELS = 921600;    // 720p (1280x720)
+const AVC_LEVEL_4_0_MAX_PIXELS = 2097152;   // 1080p (1920x1080)
+const AVC_LEVEL_5_0_MAX_PIXELS = 8912896;   // 4K (3840x2160)
+const DOWNSCALE_WIDTH = 1920;   // Level 5.0超過時のダウンスケール幅
+const DOWNSCALE_HEIGHT = 1080;  // Level 5.0超過時のダウンスケール高さ
+
+// coded area（マクロブロック境界に丸められた実際のエンコード領域）を計算
+function calculateCodedArea(width, height) {
+    return width * Math.ceil(height / H264_MACROBLOCK_SIZE) * H264_MACROBLOCK_SIZE;
+}
+
 export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('encodeToFile started');
 
@@ -222,15 +235,8 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             console.warn(`  ⚠️  RESOLUTION WILL BE CHANGED: ${detectedFormat.video.width}x${detectedFormat.video.height} → ${actualWidth}x${actualHeight}`);
         }
 
-        // H.264 コーデックレベルの最大ピクセル数定数
-        const H264_MACROBLOCK_SIZE = 16; // H.264のマクロブロックサイズ
-        const AVC_LEVEL_3_1_MAX_PIXELS = 921600;    // 720p (1280x720)
-        const AVC_LEVEL_4_0_MAX_PIXELS = 2097152;   // 1080p (1920x1080)
-        const AVC_LEVEL_5_0_MAX_PIXELS = 8912896;   // 4K (3840x2160)
-
         // 解像度に応じて適切なコーデックレベルを選択
-        // coded height はマクロブロックサイズの倍数に丸められるため、1080pは実際には1088になる可能性がある
-        const codedArea = actualWidth * Math.ceil(actualHeight / H264_MACROBLOCK_SIZE) * H264_MACROBLOCK_SIZE;
+        const codedArea = calculateCodedArea(actualWidth, actualHeight);
         let selectedCodec = config.video.codec ?? 'avc1.640028';
         
         // H.264の場合、解像度に応じてレベルを自動調整
@@ -245,10 +251,10 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 // 4K: Level 5.0
                 selectedCodec = 'avc1.640032';
             } else {
-                // Level 5.0を超える場合は1920x1080にダウンスケール
-                console.warn(`  ⚠️  Resolution ${actualWidth}x${actualHeight} exceeds Level 5.0 limit, downscaling to 1920x1080`);
-                actualWidth = 1920;
-                actualHeight = 1080;
+                // Level 5.0を超える場合はダウンスケール
+                console.warn(`  ⚠️  Resolution ${actualWidth}x${actualHeight} exceeds Level 5.0 limit, downscaling to ${DOWNSCALE_WIDTH}x${DOWNSCALE_HEIGHT}`);
+                actualWidth = DOWNSCALE_WIDTH;
+                actualHeight = DOWNSCALE_HEIGHT;
                 selectedCodec = 'avc1.640028'; // Level 4.0
             }
             if (selectedCodec !== config.video.codec) {
