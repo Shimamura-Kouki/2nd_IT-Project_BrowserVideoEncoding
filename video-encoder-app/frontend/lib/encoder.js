@@ -377,6 +377,12 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('Finalizing muxer...');
     muxer.finalize();
 
+    // Wait for muxer to flush all buffered data (including moov atom) to the stream
+    // Without this delay, the fileStream.close() can happen before the muxer writes the final metadata,
+    // resulting in "moov atom not found" error
+    console.log('Waiting for muxer to flush buffered data...');
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     console.log('Closing file stream...');
     await fileStream.close();
 
