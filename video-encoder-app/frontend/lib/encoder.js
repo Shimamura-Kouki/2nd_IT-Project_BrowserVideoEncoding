@@ -160,8 +160,8 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             frame.close();
             const elapsedMs = performance.now() - start;
             const fps = frameCount / (elapsedMs / 1000);
-            // FPS情報と経過時間のみ更新（stage/percentは保持）
-            onProgress({ stage: undefined, percent: undefined, fps, elapsedMs });
+            // FPS情報と経過時間のみ更新（stage/percentは含めない）
+            onProgress({ fps, elapsedMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
     });
