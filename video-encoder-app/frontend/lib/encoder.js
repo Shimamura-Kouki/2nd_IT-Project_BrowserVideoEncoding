@@ -123,7 +123,6 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
         width: config.video.width,
         height: config.video.height,
         bitrate: config.video.bitrate,
-        bitrateMode: 'variable',
         framerate: config.video.framerate,
         latencyMode: 'quality'
     });
@@ -236,7 +235,6 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             width: actualWidth,
             height: actualHeight,
             bitrate: config.video.bitrate,
-            bitrateMode: 'variable',
             framerate: config.video.framerate,
             latencyMode: 'quality',
             avc: { format: 'avc' }
@@ -245,7 +243,6 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             width: actualWidth, 
             height: actualHeight, 
             bitrate: config.video.bitrate,
-            bitrateMode: 'variable',
             codec: config.video.codec,
             framerate: config.video.framerate
         });
