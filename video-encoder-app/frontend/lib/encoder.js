@@ -14,7 +14,8 @@ const DOWNSCALE_HEIGHT = 1080;  // Level 5.0超過時のダウンスケール高
 
 // coded area（マクロブロック境界に丸められた実際のエンコード領域）を計算
 function calculateCodedArea(width, height) {
-    return width * Math.ceil(height / H264_MACROBLOCK_SIZE) * H264_MACROBLOCK_SIZE;
+    const codedHeight = Math.ceil(height / H264_MACROBLOCK_SIZE) * H264_MACROBLOCK_SIZE;
+    return width * codedHeight;
 }
 
 export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
@@ -237,7 +238,8 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
 
         // 解像度に応じて適切なコーデックレベルを選択
         const codedArea = calculateCodedArea(actualWidth, actualHeight);
-        let selectedCodec = config.video.codec ?? 'avc1.640028';
+        const originalCodec = config.video.codec;
+        let selectedCodec = originalCodec ?? 'avc1.640028';
         
         // H.264の場合、解像度に応じてレベルを自動調整
         if (selectedCodec.startsWith('avc1.')) {
@@ -257,8 +259,9 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 actualHeight = DOWNSCALE_HEIGHT;
                 selectedCodec = 'avc1.640028'; // Level 4.0
             }
-            if (selectedCodec !== config.video.codec) {
-                console.warn(`  ⚠️  Codec level adjusted: ${config.video.codec} → ${selectedCodec} (resolution: ${actualWidth}x${actualHeight}, coded area: ${codedArea})`);
+            // オリジナルのコーデック設定と異なる場合のみ警告
+            if (originalCodec && selectedCodec !== originalCodec) {
+                console.warn(`  ⚠️  Codec level adjusted: ${originalCodec} → ${selectedCodec} (resolution: ${actualWidth}x${actualHeight}, coded area: ${codedArea})`);
             }
         }
 
