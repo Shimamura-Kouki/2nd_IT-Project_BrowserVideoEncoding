@@ -2,7 +2,7 @@
 // Muxer と FileSystemWritableFileStreamTarget は index.html で window.Mp4MuxerClasses に設定される
 
 // onProgress の呼び出し形式: onProgress({ stage, percent, fps, elapsedMs })
-// stage: 'encoding' (読み込み&エンコード)
+// stage: 'demuxing' (ファイル読み込み&デマックス), 'encoding' (エンコード)
 
 export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('encodeToFile started');
@@ -196,7 +196,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
 
     // ===== SINGLE-PASS ENCODING: Format detection and encoding in one pass =====
     console.log('Starting single-pass encoding with format detection...');
-    onProgress({ stage: 'encoding', percent: 0, fps: 0, elapsedMs: 0 });
+    onProgress({ stage: 'demuxing', percent: 0, fps: 0, elapsedMs: 0 });
 
     // onReady callback: 初期化処理（Muxer, AudioEncoder）
     const onReady = async (detectedFormat) => {
@@ -239,7 +239,13 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             latencyMode: 'quality',
             avc: { format: 'avc' }
         });
-        console.log('✅ VideoEncoder configured:', { width: actualWidth, height: actualHeight });
+        console.log('✅ VideoEncoder configured:', { 
+            width: actualWidth, 
+            height: actualHeight, 
+            bitrate: config.video.bitrate,
+            codec: config.video.codec,
+            framerate: config.video.framerate
+        });
 
         // ===== Muxer 初期化 =====
         console.log('Initializing Muxer...');
@@ -311,7 +317,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     // 単一パスでエンコード（onReadyコールバックで初期化）
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
         const percent = pct;
-        onProgress({ stage: 'encoding', percent, fps: undefined, elapsedMs: performance.now() - start });
+        onProgress({ stage: 'demuxing', percent, fps: undefined, elapsedMs: performance.now() - start });
     }, onReady);
     
     // Set expected frame count from demuxer result
