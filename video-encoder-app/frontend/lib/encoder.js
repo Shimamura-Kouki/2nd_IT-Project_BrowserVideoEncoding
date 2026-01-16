@@ -29,6 +29,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     let videoBaseTsUs = null;
     let audioBaseTsUs = null;
     let muxerInitialized = false;
+    let detectedAudioFormat = null;
     
     // Track expected frame count and completion
     let expectedFrameCount = 0;
@@ -51,7 +52,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 });
             }
             if (muxerInitialized && muxer) {
-                // ⚠️ mp4-muxerは「ミリ秒」単位のタイムスタンプを期待（マイクロ秒ではない）
+                // addVideoChunkRaw() expects timestamps and durations in microseconds
                 const tsUs = Number(chunk.timestamp) || 0;
                 const durUs = Number(chunk.duration) || 0;
 
@@ -62,18 +63,14 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 const normalizedTsUs = Math.max(0, tsUs - videoBaseTsUs);
 
                 try {
-                    // マイクロ秒 → ミリ秒に変換（mp4-muxer要件）
-                    const finalTsMs = normalizedTsUs / 1000;
-                    const durationMs = durUs / 1000;
-
                     if (videoChunkCount <= 3 || videoChunkCount % 500 === 0) {
-                        console.log(`[CHUNK ${videoChunkCount}] ts: ${finalTsMs.toFixed(2)}ms, dur: ${durationMs.toFixed(2)}ms, type: ${chunk.type}`);
+                        console.log(`[CHUNK ${videoChunkCount}] ts: ${normalizedTsUs.toFixed(2)}us, dur: ${durUs.toFixed(2)}us, type: ${chunk.type}`);
                     }
 
-                    // addVideoChunkRaw()を使用してtimestampとduration両方をミリ秒で渡す
+                    // addVideoChunkRaw() expects timestamp and duration in microseconds
                     const data = new Uint8Array(chunk.byteLength);
                     chunk.copyTo(data);
-                    muxer.addVideoChunkRaw(data, chunk.type, finalTsMs, durationMs, meta);
+                    muxer.addVideoChunkRaw(data, chunk.type, normalizedTsUs, durUs, meta);
 
                     videoChunkAddedCount++;
                 } catch (e) {
@@ -172,26 +169,24 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     const audioDecoder = config.audio ? new AudioDecoder({
         output: (audioData) => {
             if (audioEncoder && !audioEncoderClosed && audioEncoder.state !== 'closed') {
-                // フォーマット不一致の警告（初回のみ）
-                if (!audioFormatWarned &&
-                    (audioData.sampleRate !== config.audio.sampleRate ||
-                        audioData.numberOfChannels !== config.audio.numberOfChannels)) {
-                    console.warn('Audio format mismatch! Input:', {
+                // Check if detected format is available and matches decoded audio
+                // Only warn if there's a mismatch with the detected format
+                if (!audioFormatWarned && detectedAudioFormat &&
+                    (audioData.sampleRate !== detectedAudioFormat.sampleRate ||
+                        audioData.numberOfChannels !== detectedAudioFormat.numberOfChannels)) {
+                    console.warn('Audio format mismatch! Decoded audio:', {
                         sampleRate: audioData.sampleRate,
                         channels: audioData.numberOfChannels
-                    }, 'Expected:', {
-                        sampleRate: config.audio.sampleRate,
-                        channels: config.audio.numberOfChannels
+                    }, 'Expected (detected):', {
+                        sampleRate: detectedAudioFormat.sampleRate,
+                        channels: detectedAudioFormat.numberOfChannels
                     });
-                    console.warn('Audio will be skipped. Please select a preset matching your input file.');
+                    console.warn('This should not happen - audio format detection may be incorrect.');
                     audioFormatWarned = true;
                 }
 
-                // フォーマットが一致する場合のみエンコード
-                if (audioData.sampleRate === config.audio.sampleRate &&
-                    audioData.numberOfChannels === config.audio.numberOfChannels) {
-                    audioEncoder.encode(audioData);
-                }
+                // Always encode audio data as the encoder is already configured with the correct format
+                audioEncoder.encode(audioData);
             }
             audioData.close();
         },
@@ -208,6 +203,9 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
         
         totalVideoDurationUs = Number(detectedFormat.video?.durationUs) || 0;
         console.log('Total video duration:', totalVideoDurationUs, 'us');
+
+        // Store detected audio format for use in AudioDecoder output callback
+        detectedAudioFormat = detectedFormat.audio;
 
         // 検出された実際の解像度で encoder/muxer を設定
         let actualWidth = detectedFormat.video?.width || config.video.width;
