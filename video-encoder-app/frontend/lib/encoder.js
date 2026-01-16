@@ -181,11 +181,12 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                         sampleRate: detectedAudioFormat.sampleRate,
                         channels: detectedAudioFormat.numberOfChannels
                     });
-                    console.warn('This should not happen - audio format detection may be incorrect.');
+                    console.warn('Audio format mismatch detected. This may indicate an issue with the format detection logic or unexpected audio stream properties.');
                     audioFormatWarned = true;
                 }
 
-                // Always encode audio data as the encoder is already configured with the correct format
+                // Encode all audio data - the AudioEncoder is configured in onReady callback
+                // with the detected audio format (detectedFormat.audio.sampleRate and numberOfChannels)
                 audioEncoder.encode(audioData);
             }
             audioData.close();
