@@ -214,14 +214,6 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
 
         console.log('Resolution check: width=', actualWidth, 'height=', actualHeight, 'pixels=', actualWidth * actualHeight);
 
-        // AVC Level 5.0制限: 最大2228224ピクセル
-        const maxPixels = 2228224;
-        if (actualWidth * actualHeight > maxPixels) {
-            console.log('Resolution exceeds AVC Level 5.0 limit, normalizing to 1920x1080');
-            actualWidth = 1920;
-            actualHeight = 1080;
-        }
-
         // ===== VideoEncoder 再設定 =====
         console.log('\n🎬 VideoEncoder re-configuration');
         console.log(`  Input video format: ${detectedFormat.video.width}x${detectedFormat.video.height}`);
@@ -230,25 +222,34 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             console.warn(`  ⚠️  RESOLUTION WILL BE CHANGED: ${detectedFormat.video.width}x${detectedFormat.video.height} → ${actualWidth}x${actualHeight}`);
         }
 
+        // H.264 コーデックレベルの最大ピクセル数定数
+        const H264_MACROBLOCK_SIZE = 16; // H.264のマクロブロックサイズ
+        const AVC_LEVEL_3_1_MAX_PIXELS = 921600;    // 720p (1280x720)
+        const AVC_LEVEL_4_0_MAX_PIXELS = 2097152;   // 1080p (1920x1080)
+        const AVC_LEVEL_5_0_MAX_PIXELS = 8912896;   // 4K (3840x2160)
+
         // 解像度に応じて適切なコーデックレベルを選択
-        // coded height は16の倍数に丸められるため、1080pは実際には1088になる可能性がある
-        const codedArea = actualWidth * Math.ceil(actualHeight / 16) * 16;
+        // coded height はマクロブロックサイズの倍数に丸められるため、1080pは実際には1088になる可能性がある
+        const codedArea = actualWidth * Math.ceil(actualHeight / H264_MACROBLOCK_SIZE) * H264_MACROBLOCK_SIZE;
         let selectedCodec = config.video.codec ?? 'avc1.640028';
         
         // H.264の場合、解像度に応じてレベルを自動調整
         if (selectedCodec.startsWith('avc1.')) {
-            // Level 3.1 (0x1F): 最大 921600 pixels (720p)
-            // Level 4.0 (0x28): 最大 2097152 pixels (1080p)
-            // Level 5.0 (0x32): 最大 8912896 pixels (4K)
-            if (codedArea <= 921600) {
+            if (codedArea <= AVC_LEVEL_3_1_MAX_PIXELS) {
                 // 720p以下: Level 3.1
                 selectedCodec = 'avc1.4d001f';
-            } else if (codedArea <= 2097152) {
+            } else if (codedArea <= AVC_LEVEL_4_0_MAX_PIXELS) {
                 // 1080p: Level 4.0
                 selectedCodec = 'avc1.640028';
-            } else {
+            } else if (codedArea <= AVC_LEVEL_5_0_MAX_PIXELS) {
                 // 4K: Level 5.0
                 selectedCodec = 'avc1.640032';
+            } else {
+                // Level 5.0を超える場合は1920x1080にダウンスケール
+                console.warn(`  ⚠️  Resolution ${actualWidth}x${actualHeight} exceeds Level 5.0 limit, downscaling to 1920x1080`);
+                actualWidth = 1920;
+                actualHeight = 1080;
+                selectedCodec = 'avc1.640028'; // Level 4.0
             }
             if (selectedCodec !== config.video.codec) {
                 console.warn(`  ⚠️  Codec level adjusted: ${config.video.codec} → ${selectedCodec} (resolution: ${actualWidth}x${actualHeight}, coded area: ${codedArea})`);
