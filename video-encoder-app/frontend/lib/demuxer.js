@@ -181,8 +181,14 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onProgres
                 Promise.all([
                     videoDecoder.flush(),
                     audioDecoder ? audioDecoder.flush() : Promise.resolve()
-                ]).then(() => {
+                ]).then(async () => {
                     console.log('demuxAndDecode: decoders flushed, total video samples:', totalVideoSamples);
+                    // Extended delay to ensure all output callbacks have been invoked
+                    // 100ms delay: only 10/1069 frames decoded (< 1%)
+                    // 2000ms delay: only 189/1069 frames decoded (17.7%)
+                    // Increased to 10000ms (10 seconds) to allow decoder sufficient time
+                    await new Promise(resolve => setTimeout(resolve, 10000));
+                    console.log('demuxAndDecode: delay complete, resolving with sample count:', totalVideoSamples);
                     resolve({
                         video: detectedVideoFormat ? { ...detectedVideoFormat, durationUs: lastVideoTimestampUs, sampleCount: totalVideoSamples } : null,
                         audio: detectedAudioFormat

@@ -354,15 +354,20 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('Total audio chunks encoded:', audioChunkCount);
     console.log('Total audio chunks added to muxer:', audioChunkAddedCount);
 
+    console.log('Before encoder flush - frames decoded:', frameCount, 'chunks encoded:', videoChunkCount);
     await videoEncoder.flush();
     if (audioEncoder) await audioEncoder.flush();
+    console.log('After encoder flush - frames decoded:', frameCount, 'chunks encoded:', videoChunkCount);
     
     // Wait for all encoded chunks to be processed
     console.log('Waiting for all video chunks to be encoded...');
     if (expectedFrameCount > 0 && videoChunkCount < expectedFrameCount) {
         console.log(`Still waiting for chunks: ${videoChunkCount}/${expectedFrameCount}`);
+        console.log(`Current state - Frames decoded: ${frameCount}, Chunks encoded: ${videoChunkCount}, Chunks added to muxer: ${videoChunkAddedCount}`);
+        
         await encodingCompletePromise;
         console.log('All video chunks have been encoded');
+        console.log(`Final state - Frames decoded: ${frameCount}, Chunks encoded: ${videoChunkCount}, Chunks added to muxer: ${videoChunkAddedCount}`);
     } else if (expectedFrameCount > 0) {
         console.log('All expected chunks already encoded');
     } else {
@@ -371,6 +376,12 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
 
     console.log('Finalizing muxer...');
     muxer.finalize();
+
+    // Wait for muxer to flush all buffered data (including moov atom) to the stream
+    // Without this delay, the fileStream.close() can happen before the muxer writes the final metadata,
+    // resulting in "moov atom not found" error
+    console.log('Waiting for muxer to flush buffered data...');
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     console.log('Closing file stream...');
     await fileStream.close();
