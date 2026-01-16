@@ -115,7 +115,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 
                 // エンコードFPSを計算（エンコード済みチャンク数 / 経過時間）
                 const elapsedMs = performance.now() - start;
-                const encodingFps = videoChunkCount / (elapsedMs / 1000);
+                const encodingFps = elapsedMs > 100 ? videoChunkCount / (elapsedMs / 1000) : 0;
                 
                 if (videoChunkCount % 100 === 0) {
                     console.log('Encoding progress:', encPercent.toFixed(1) + '%, encoded:', encodedVideoUs, 'total:', totalVideoDurationUs, 'fps:', encodingFps.toFixed(1));
