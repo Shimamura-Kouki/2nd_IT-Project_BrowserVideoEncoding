@@ -112,10 +112,15 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 const tsNorm = Math.max(0, tsRaw - base);
                 encodedVideoUs = Math.max(encodedVideoUs, tsNorm + dur);
                 const encPercent = Math.min(100, 100 * (encodedVideoUs / totalVideoDurationUs));
+                
+                // エンコードFPSを計算（エンコード済みチャンク数 / 経過時間）
+                const elapsedMs = performance.now() - start;
+                const encodingFps = videoChunkCount / (elapsedMs / 1000);
+                
                 if (videoChunkCount % 100 === 0) {
-                    console.log('Encoding progress:', encPercent.toFixed(1) + '%, encoded:', encodedVideoUs, 'total:', totalVideoDurationUs);
+                    console.log('Encoding progress:', encPercent.toFixed(1) + '%, encoded:', encodedVideoUs, 'total:', totalVideoDurationUs, 'fps:', encodingFps.toFixed(1));
                 }
-                onProgress({ stage: 'encoding', percent: encPercent, fps: undefined, elapsedMs: performance.now() - start });
+                onProgress({ stage: 'encoding', percent: encPercent, fps: encodingFps, elapsedMs });
             } else if (videoChunkCount === 1) {
                 console.log('Warning: totalVideoDurationUs is', totalVideoDurationUs);
             }
@@ -172,10 +177,9 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 throw encErr;
             }
             frame.close();
+            // 経過時間のみ更新（FPSはエンコーダー側で計算）
             const elapsedMs = performance.now() - start;
-            const fps = frameCount / (elapsedMs / 1000);
-            // FPS情報と経過時間のみ更新（stage/percentは含めない）
-            onProgress({ fps, elapsedMs });
+            onProgress({ elapsedMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
     });
@@ -223,11 +227,14 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
         // Store detected audio format for use in AudioDecoder output callback
         detectedAudioFormat = detectedFormat.audio;
 
-        // 検出された実際の解像度で encoder/muxer を設定
-        let actualWidth = detectedFormat.video?.width || config.video.width;
-        let actualHeight = detectedFormat.video?.height || config.video.height;
+        // プリセットの目標解像度を使用（リサイズが必要な場合）
+        let actualWidth = config.video.width;
+        let actualHeight = config.video.height;
 
-        console.log('Resolution check: width=', actualWidth, 'height=', actualHeight, 'pixels=', actualWidth * actualHeight);
+        console.log('Resolution check:');
+        console.log(`  Source video: ${detectedFormat.video.width}x${detectedFormat.video.height}`);
+        console.log(`  Target (preset): ${actualWidth}x${actualHeight}`);
+        console.log(`  Pixels: ${actualWidth * actualHeight}`);
 
         // ===== VideoEncoder 再設定 =====
         console.log('\n🎬 VideoEncoder re-configuration');
