@@ -230,8 +230,33 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             console.warn(`  ⚠️  RESOLUTION WILL BE CHANGED: ${detectedFormat.video.width}x${detectedFormat.video.height} → ${actualWidth}x${actualHeight}`);
         }
 
+        // 解像度に応じて適切なコーデックレベルを選択
+        // coded height は16の倍数に丸められるため、1080pは実際には1088になる可能性がある
+        const codedArea = actualWidth * Math.ceil(actualHeight / 16) * 16;
+        let selectedCodec = config.video.codec ?? 'avc1.640028';
+        
+        // H.264の場合、解像度に応じてレベルを自動調整
+        if (selectedCodec.startsWith('avc1.')) {
+            // Level 3.1 (0x1F): 最大 921600 pixels (720p)
+            // Level 4.0 (0x28): 最大 2097152 pixels (1080p)
+            // Level 5.0 (0x32): 最大 8912896 pixels (4K)
+            if (codedArea <= 921600) {
+                // 720p以下: Level 3.1
+                selectedCodec = 'avc1.4d001f';
+            } else if (codedArea <= 2097152) {
+                // 1080p: Level 4.0
+                selectedCodec = 'avc1.640028';
+            } else {
+                // 4K: Level 5.0
+                selectedCodec = 'avc1.640032';
+            }
+            if (selectedCodec !== config.video.codec) {
+                console.warn(`  ⚠️  Codec level adjusted: ${config.video.codec} → ${selectedCodec} (resolution: ${actualWidth}x${actualHeight}, coded area: ${codedArea})`);
+            }
+        }
+
         videoEncoder.configure({
-            codec: config.video.codec ?? 'avc1.640028',
+            codec: selectedCodec,
             width: actualWidth,
             height: actualHeight,
             bitrate: config.video.bitrate,
@@ -243,7 +268,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             width: actualWidth, 
             height: actualHeight, 
             bitrate: config.video.bitrate,
-            codec: config.video.codec,
+            codec: selectedCodec,
             framerate: config.video.framerate
         });
 
