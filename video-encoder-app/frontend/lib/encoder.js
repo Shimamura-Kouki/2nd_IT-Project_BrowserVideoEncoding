@@ -2,7 +2,22 @@
 // Muxer と FileSystemWritableFileStreamTarget は index.html で window.Mp4MuxerClasses に設定される
 
 // onProgress の呼び出し形式: onProgress({ stage, percent, fps, elapsedMs })
-// stage: 'encoding' (読み込み&エンコード)
+// stage: 'demuxing' (ファイル読み込み&デマックス), 'encoding' (エンコード)
+
+// H.264 コーデックレベルの定数
+const H264_MACROBLOCK_SIZE = 16; // H.264のマクロブロックサイズ
+// AVC Level最大ピクセル数（H.264仕様による制限値）
+const AVC_LEVEL_3_1_MAX_PIXELS = 921600;    // Level 3.1: 最大921,600ピクセル（720p相当）
+const AVC_LEVEL_4_0_MAX_PIXELS = 2097152;   // Level 4.0: 最大2,097,152ピクセル（1080p相当）
+const AVC_LEVEL_5_0_MAX_PIXELS = 8912896;   // Level 5.0: 最大8,912,896ピクセル（4K Level 5.0制限）
+const DOWNSCALE_WIDTH = 1920;   // Level 5.0超過時のダウンスケール幅
+const DOWNSCALE_HEIGHT = 1080;  // Level 5.0超過時のダウンスケール高さ
+
+// coded area（マクロブロック境界に丸められた実際のエンコード領域）を計算
+function calculateCodedArea(width, height) {
+    const codedHeight = Math.ceil(height / H264_MACROBLOCK_SIZE) * H264_MACROBLOCK_SIZE;
+    return width * codedHeight;
+}
 
 export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     console.log('encodeToFile started');
@@ -97,10 +112,15 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 const tsNorm = Math.max(0, tsRaw - base);
                 encodedVideoUs = Math.max(encodedVideoUs, tsNorm + dur);
                 const encPercent = Math.min(100, 100 * (encodedVideoUs / totalVideoDurationUs));
+                
+                // エンコードFPSを計算（エンコード済みチャンク数 / 経過時間）
+                const elapsedMs = performance.now() - start;
+                const encodingFps = elapsedMs > 100 ? videoChunkCount / (elapsedMs / 1000) : 0;
+                
                 if (videoChunkCount % 100 === 0) {
-                    console.log('Encoding progress:', encPercent.toFixed(1) + '%, encoded:', encodedVideoUs, 'total:', totalVideoDurationUs);
+                    console.log('Encoding progress:', encPercent.toFixed(1) + '%, encoded:', encodedVideoUs, 'total:', totalVideoDurationUs, 'fps:', encodingFps.toFixed(1));
                 }
-                onProgress({ stage: 'encoding', percent: encPercent, fps: undefined, elapsedMs: performance.now() - start });
+                onProgress({ stage: 'encoding', percent: encPercent, fps: encodingFps, elapsedMs });
             } else if (videoChunkCount === 1) {
                 console.log('Warning: totalVideoDurationUs is', totalVideoDurationUs);
             }
@@ -157,10 +177,9 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
                 throw encErr;
             }
             frame.close();
+            // 経過時間のみ更新（FPSはエンコーダー側で計算）
             const elapsedMs = performance.now() - start;
-            const fps = frameCount / (elapsedMs / 1000);
-            // FPS情報と経過時間のみ更新（stage/percentは保持）
-            onProgress({ stage: undefined, percent: undefined, fps, elapsedMs });
+            onProgress({ elapsedMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
     });
@@ -196,7 +215,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
 
     // ===== SINGLE-PASS ENCODING: Format detection and encoding in one pass =====
     console.log('Starting single-pass encoding with format detection...');
-    onProgress({ stage: 'encoding', percent: 0, fps: 0, elapsedMs: 0 });
+    onProgress({ stage: 'demuxing', percent: 0, fps: 0, elapsedMs: 0 });
 
     // onReady callback: 初期化処理（Muxer, AudioEncoder）
     const onReady = async (detectedFormat) => {
@@ -208,19 +227,14 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
         // Store detected audio format for use in AudioDecoder output callback
         detectedAudioFormat = detectedFormat.audio;
 
-        // 検出された実際の解像度で encoder/muxer を設定
-        let actualWidth = detectedFormat.video?.width || config.video.width;
-        let actualHeight = detectedFormat.video?.height || config.video.height;
+        // プリセットの目標解像度を使用（リサイズが必要な場合）
+        let actualWidth = config.video.width;
+        let actualHeight = config.video.height;
 
-        console.log('Resolution check: width=', actualWidth, 'height=', actualHeight, 'pixels=', actualWidth * actualHeight);
-
-        // AVC Level 5.0制限: 最大2228224ピクセル
-        const maxPixels = 2228224;
-        if (actualWidth * actualHeight > maxPixels) {
-            console.log('Resolution exceeds AVC Level 5.0 limit, normalizing to 1920x1080');
-            actualWidth = 1920;
-            actualHeight = 1080;
-        }
+        console.log('Resolution check:');
+        console.log(`  Source video: ${detectedFormat.video.width}x${detectedFormat.video.height}`);
+        console.log(`  Target (preset): ${actualWidth}x${actualHeight}`);
+        console.log(`  Pixels: ${actualWidth * actualHeight}`);
 
         // ===== VideoEncoder 再設定 =====
         console.log('\n🎬 VideoEncoder re-configuration');
@@ -230,8 +244,37 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             console.warn(`  ⚠️  RESOLUTION WILL BE CHANGED: ${detectedFormat.video.width}x${detectedFormat.video.height} → ${actualWidth}x${actualHeight}`);
         }
 
+        // 解像度に応じて適切なコーデックレベルを選択
+        const codedArea = calculateCodedArea(actualWidth, actualHeight);
+        const originalCodec = config.video.codec;
+        let selectedCodec = originalCodec ?? 'avc1.640028';
+        
+        // H.264の場合、解像度に応じてレベルを自動調整
+        if (selectedCodec.startsWith('avc1.')) {
+            if (codedArea <= AVC_LEVEL_3_1_MAX_PIXELS) {
+                // 720p以下: Level 3.1
+                selectedCodec = 'avc1.4d001f';
+            } else if (codedArea <= AVC_LEVEL_4_0_MAX_PIXELS) {
+                // 1080p: Level 4.0
+                selectedCodec = 'avc1.640028';
+            } else if (codedArea <= AVC_LEVEL_5_0_MAX_PIXELS) {
+                // 4K: Level 5.0
+                selectedCodec = 'avc1.640032';
+            } else {
+                // Level 5.0を超える場合はダウンスケール
+                console.warn(`  ⚠️  Resolution ${actualWidth}x${actualHeight} exceeds Level 5.0 limit, downscaling to ${DOWNSCALE_WIDTH}x${DOWNSCALE_HEIGHT}`);
+                actualWidth = DOWNSCALE_WIDTH;
+                actualHeight = DOWNSCALE_HEIGHT;
+                selectedCodec = 'avc1.640028'; // Level 4.0
+            }
+            // オリジナルのコーデック設定と異なる場合のみ警告
+            if (originalCodec && selectedCodec !== originalCodec) {
+                console.warn(`  ⚠️  Codec level adjusted: ${originalCodec} → ${selectedCodec} (resolution: ${actualWidth}x${actualHeight}, coded area: ${codedArea})`);
+            }
+        }
+
         videoEncoder.configure({
-            codec: config.video.codec ?? 'avc1.640028',
+            codec: selectedCodec,
             width: actualWidth,
             height: actualHeight,
             bitrate: config.video.bitrate,
@@ -239,7 +282,13 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
             latencyMode: 'quality',
             avc: { format: 'avc' }
         });
-        console.log('✅ VideoEncoder configured:', { width: actualWidth, height: actualHeight });
+        console.log('✅ VideoEncoder configured:', { 
+            width: actualWidth, 
+            height: actualHeight, 
+            bitrate: config.video.bitrate,
+            codec: selectedCodec,
+            framerate: config.video.framerate
+        });
 
         // ===== Muxer 初期化 =====
         console.log('Initializing Muxer...');
@@ -311,7 +360,7 @@ export async function encodeToFile(file, config, onProgress, demuxAndDecode) {
     // 単一パスでエンコード（onReadyコールバックで初期化）
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, (pct) => {
         const percent = pct;
-        onProgress({ stage: 'encoding', percent, fps: undefined, elapsedMs: performance.now() - start });
+        onProgress({ stage: 'demuxing', percent, fps: undefined, elapsedMs: performance.now() - start });
     }, onReady);
     
     // Set expected frame count from demuxer result
