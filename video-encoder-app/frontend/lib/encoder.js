@@ -6,9 +6,10 @@
 
 // H.264 コーデックレベルの定数
 const H264_MACROBLOCK_SIZE = 16; // H.264のマクロブロックサイズ
-const AVC_LEVEL_3_1_MAX_PIXELS = 921600;    // 720p (1280x720)
-const AVC_LEVEL_4_0_MAX_PIXELS = 2097152;   // 1080p (1920x1080)
-const AVC_LEVEL_5_0_MAX_PIXELS = 8912896;   // 4K (3840x2160)
+// AVC Level最大ピクセル数（H.264仕様による制限値）
+const AVC_LEVEL_3_1_MAX_PIXELS = 921600;    // Level 3.1: 最大921,600ピクセル（720p相当）
+const AVC_LEVEL_4_0_MAX_PIXELS = 2097152;   // Level 4.0: 最大2,097,152ピクセル（1080p相当）
+const AVC_LEVEL_5_0_MAX_PIXELS = 8912896;   // Level 5.0: 最大8,912,896ピクセル（4K Level 5.0制限）
 const DOWNSCALE_WIDTH = 1920;   // Level 5.0超過時のダウンスケール幅
 const DOWNSCALE_HEIGHT = 1080;  // Level 5.0超過時のダウンスケール高さ
 
