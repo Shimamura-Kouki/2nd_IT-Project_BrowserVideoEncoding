@@ -39,7 +39,9 @@ export async function encodeToFile(file, config, onProgress) {
             };
         }
 
-        muxer = new Muxer(muxerConfig);
+        muxer = new Muxer(muxerConfig, {
+            firstTimestampBehavior: 'offset'
+        });
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
