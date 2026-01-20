@@ -49,7 +49,7 @@ export async function encodeToFile(file, config, onProgress) {
         });
 
         videoEncoder.configure({
-            codec: config.video.codec ?? 'avc1.42c01e',
+            codec: config.video.codec ?? 'avc1.42e01e',
             width: config.video.width,
             height: config.video.height,
             bitrate: config.video.bitrate,
