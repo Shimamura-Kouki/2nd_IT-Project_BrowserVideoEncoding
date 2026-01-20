@@ -193,7 +193,7 @@
 <div class="container">
   <h1>ブラウザ動画エンコーダ</h1>
 
-  <div class="dropzone on:click={() => document.getElementById('fileInput')?.click()}>
+  <div class="dropzone" on:click={() => document.getElementById('fileInput')?.click()}>
     <input type="file" id="fileInput" accept="video/mp4" on:change={pickFile} />
     <p>MP4ファイルをドラッグ&ドロップ または クリックして選択</p>
   </div>
