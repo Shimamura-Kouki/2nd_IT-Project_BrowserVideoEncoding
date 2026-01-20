@@ -23,7 +23,7 @@
     encoding = true;
 
     const preset = presets[selectedPresetIndex]?.config_json ?? presets[selectedPresetIndex] ?? {
-        codec: 'avc1.42001f', width: 1920, height: 1080, bitrate: 5_000_000, framerate: 30, audio_bitrate: 128_000
+        codec: 'avc1.640028', width: 1920, height: 1080, bitrate: 5_000_000, framerate: 30, audio_bitrate: 128_000
     };
 
     const config = {

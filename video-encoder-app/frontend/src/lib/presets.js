@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'video-encoder-presets';
 
 const DEFAULT_PRESETS = [
-    { name: '1080p30 (5Mbps)', config_json: { codec: 'avc1.42001f', width: 1920, height: 1080, bitrate: 5_000_000, framerate: 30, audio_bitrate: 128_000 } },
+    { name: '1080p30 (5Mbps)', config_json: { codec: 'avc1.640028', width: 1920, height: 1080, bitrate: 5_000_000, framerate: 30, audio_bitrate: 128_000 } },
     { name: '720p30 (3Mbps)', config_json: { codec: 'avc1.42001f', width: 1280, height: 720, bitrate: 3_000_000, framerate: 30, audio_bitrate: 128_000 } }
 ];
 
