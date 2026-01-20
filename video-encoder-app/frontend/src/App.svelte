@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getPresets, postStore } from './lib/api/client.js';
   import { encodeToFile } from './lib/core/encoder.js';
+  import { loadPresets } from './lib/presets.js';
 
   let file: File | null = null;
   let presets: any[] = [];
@@ -9,9 +9,8 @@
   let progressPct = 0;
   let fps = 0;
   let elapsedMs = 0;
-  let userName = '';
-  let comment = '';
   let encoding = false;
+  let message = '';
 
   const pickFile = (e: Event) => {
     const input = e.target as HTMLInputElement;
@@ -20,9 +19,10 @@
 
   async function startEncoding() {
     if (!file) return;
+    message = '';
     encoding = true;
 
-    const preset = presets[selectedPresetIndex]?.config_json ?? {
+    const preset = presets[selectedPresetIndex]?.config_json ?? presets[selectedPresetIndex] ?? {
       codec: 'avc1.42001f', width: 1920, height: 1080, bitrate: 5_000_000, framerate: 30, audio_bitrate: 128_000
     };
 
@@ -45,33 +45,12 @@
       avg_fps: fps
     };
 
-    alert('エンコードが完了しました。共有用データを送信できます。');
-
-    const payload = {
-      user_name: userName || 'Anonymous',
-      comment,
-      config_json: preset,
-      benchmark_result: result,
-      user_agent: navigator.userAgent
-    };
-
-    try {
-      const r = await postStore(payload);
-      console.log('POST /api post_store:', r);
-    } catch (e) {
-      console.error(e);
-      alert('共有APIへの送信に失敗しました。');
-    }
-
+    message = `エンコードが完了しました (処理時間: ${result.process_time_ms}ms, 平均FPS: ${result.avg_fps.toFixed(1)})`;
     encoding = false;
   }
 
   onMount(async () => {
-    try {
-      presets = await getPresets();
-    } catch (e) {
-      console.warn('プリセット取得に失敗。バックエンド未起動かも', e);
-    }
+    presets = loadPresets();
   });
 </script>
 
@@ -95,22 +74,14 @@
   </div>
 
   <div class="panel">
-    <div class="row">
-      <label>ユーザー名:</label>
-      <input bind:value={userName} placeholder="Your name" />
-    </div>
-    <div class="row">
-      <label>コメント:</label>
-      <input bind:value={comment} placeholder="コメント" />
-    </div>
-  </div>
-
-  <div class="panel">
     <button on:click={startEncoding} disabled={!file || encoding}>エンコード開始</button>
   </div>
 
   <div class="panel">
     <div class="progress"><div style={`width:${progressPct}%`}></div></div>
     <p>進捗: {Math.round(progressPct)}% | FPS: {fps.toFixed(1)} | 経過: {(elapsedMs/1000).toFixed(1)}s</p>
+    {#if message}
+      <p>{message}</p>
+    {/if}
   </div>
 </div>
