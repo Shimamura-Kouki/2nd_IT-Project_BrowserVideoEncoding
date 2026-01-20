@@ -49,7 +49,7 @@ export async function encodeToFile(file, config, onProgress) {
         });
 
         videoEncoder.configure({
-            codec: config.video.codec ?? 'avc1.42e01e',
+            codec: config.video.codec ?? 'avc1.42001f',
             width: config.video.width,
             height: config.video.height,
             bitrate: config.video.bitrate,
@@ -77,7 +77,13 @@ export async function encodeToFile(file, config, onProgress) {
     const videoDecoder = new VideoDecoder({
         output: (frame) => {
             frameCount++;
-            videoEncoder.encode(frame);
+            if (videoEncoder && videoEncoder.state === 'configured') {
+                try {
+                    videoEncoder.encode(frame);
+                } catch (e) {
+                    console.error('VideoEncoder encode error:', e);
+                }
+            }
             frame.close();
             const elapsedMs = performance.now() - start;
             const fps = frameCount / (elapsedMs / 1000);
@@ -88,8 +94,12 @@ export async function encodeToFile(file, config, onProgress) {
 
     const audioDecoder = new AudioDecoder({
         output: (audioData) => {
-            if (audioEncoder) {
-                audioEncoder.encode(audioData);
+            if (audioEncoder && audioEncoder.state === 'configured') {
+                try {
+                    audioEncoder.encode(audioData);
+                } catch (e) {
+                    console.error('AudioEncoder encode error:', e);
+                }
             }
             audioData.close();
         },

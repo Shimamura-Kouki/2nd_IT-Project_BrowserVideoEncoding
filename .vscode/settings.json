@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cd \"c:\\\\Users\\\\kouki\\\\OneDrive - 滋慶学園グループ（COM）\\\\授業ファイル\\\\2025年 2年\\\\ITプロジェクト\\\\後期\\\\xampp\\\\最終成果物作成プロジェクト\\\\video-encoder-app\\\\frontend\"; npm run build 2>&1 \\| Tee-Object -Variable buildOutput; Write-Output \"Build completed\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
