@@ -437,6 +437,9 @@
       <!-- Optional Settings -->
       <div class="panel">
         <h3 class="section-title">任意設定</h3>
+        <p style="color: #ff9800; background: #fff3e0; padding: 8px; border-radius: 4px; font-size: 12px; margin-bottom: 16px;">
+          ⚠️ 回転と反転機能は現在開発中のため、設定しても適用されません
+        </p>
         
         <div class="row">
           <label>映像の回転:</label>

@@ -70,6 +70,14 @@ export async function encodeToFile(file, config, onProgress) {
         const { hasAudio, audioFormat, videoFormat, totalFrames: frames } = detectedFormat;
         totalFrames = frames ?? 0; // Store total frames for progress calculation
         
+        // Check for unsupported features and log warnings
+        if (config.video.rotation && config.video.rotation !== 0) {
+            console.warn('Video rotation is not yet implemented and will be ignored.');
+        }
+        if (config.video.flipHorizontal || config.video.flipVertical) {
+            console.warn('Video flipping is not yet implemented and will be ignored.');
+        }
+        
         // Calculate actual output dimensions to prevent upscaling
         let outputWidth = config.video.width;
         let outputHeight = config.video.height;
