@@ -53,7 +53,8 @@ export async function encodeToFile(file, config, onProgress) {
         const muxerConfig = {
             target: new FileSystemWritableFileStreamTarget(fileStream),
             video: { codec: 'avc', width: config.video.width, height: config.video.height },
-            fastStart: false
+            fastStart: false,
+            firstTimestampBehavior: 'offset'
         };
 
         // Only add audio track if source has audio AND config includes audio
@@ -66,9 +67,7 @@ export async function encodeToFile(file, config, onProgress) {
             };
         }
 
-        muxer = new Muxer(muxerConfig, {
-            firstTimestampBehavior: 'offset'
-        });
+        muxer = new Muxer(muxerConfig);
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
