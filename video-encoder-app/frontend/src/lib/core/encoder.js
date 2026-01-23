@@ -1,6 +1,10 @@
 import { Muxer, FileSystemWritableFileStreamTarget } from 'mp4-muxer';
 import { demuxAndDecode } from './demuxer.js';
 
+// Progress contribution: demuxing contributes 10% of total progress, encoding 90%
+const DEMUX_PROGRESS_PERCENTAGE = 10;
+const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
+
 /**
  * ブラウザ内でエンコードし、FileSystem APIへストリーム保存
  * @param {File} file
@@ -19,6 +23,7 @@ export async function encodeToFile(file, config, onProgress) {
     let videoEncoder = null;
     let audioEncoder = null;
     let frameCount = 0;
+    let totalFrames = 0; // Total frames to encode
     const start = performance.now();
     
     // Timeout delay to ensure all encoder output callbacks complete before finalization
@@ -62,7 +67,8 @@ export async function encodeToFile(file, config, onProgress) {
 
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
-        const { hasAudio, audioFormat } = detectedFormat;
+        const { hasAudio, audioFormat, totalFrames: frames } = detectedFormat;
+        totalFrames = frames ?? 0; // Store total frames for progress calculation
         
         // Create muxer with appropriate configuration
         const muxerConfig = {
@@ -144,7 +150,15 @@ export async function encodeToFile(file, config, onProgress) {
             frame.close();
             const elapsedMs = performance.now() - start;
             const fps = frameCount / (elapsedMs / 1000);
-            onProgress(undefined, { fps, elapsedMs });
+            
+            // Calculate progress: DEMUX_PROGRESS_PERCENTAGE for demuxing (already done) + remaining for encoding
+            // Encoding progress is based on frames processed vs total frames
+            let encodingProgress = DEMUX_PROGRESS_PERCENTAGE; // Start at demuxing complete
+            if (totalFrames > 0) {
+                encodingProgress = DEMUX_PROGRESS_PERCENTAGE + (frameCount / totalFrames) * ENCODING_PROGRESS_PERCENTAGE;
+            }
+            
+            onProgress(encodingProgress, { fps, elapsedMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
     });
@@ -175,6 +189,9 @@ export async function encodeToFile(file, config, onProgress) {
     
     // Wait for all pending chunks to be written to muxer
     await allChunksWrittenPromise;
+    
+    // Set progress to 100% when encoding is complete
+    onProgress(100);
     
     // Now safe to finalize - all chunks have been written
     muxer.finalize();
