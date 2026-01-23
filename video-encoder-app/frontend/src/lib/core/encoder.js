@@ -31,6 +31,7 @@ export async function encodeToFile(file, config, onProgress) {
     const allChunksWrittenPromise = new Promise(resolve => {
         resolveAllChunksWritten = resolve;
     });
+    let completionCheckTimeout = null;
 
     /**
      * Check if all chunks have been written to the muxer
@@ -38,10 +39,21 @@ export async function encodeToFile(file, config, onProgress) {
      * - Encoding is marked complete (after encoder flush)
      * - No pending video chunks
      * - No pending audio chunks
+     * - A brief delay has passed to ensure no more chunks are coming
      */
     const checkIfComplete = () => {
         if (encodingComplete && pendingVideoChunks === 0 && pendingAudioChunks === 0) {
-            resolveAllChunksWritten();
+            // Clear any existing timeout
+            if (completionCheckTimeout) {
+                clearTimeout(completionCheckTimeout);
+            }
+            // Wait a brief moment to ensure no more chunks are coming from the encoder
+            completionCheckTimeout = setTimeout(() => {
+                // Double-check the counters after the delay
+                if (pendingVideoChunks === 0 && pendingAudioChunks === 0) {
+                    resolveAllChunksWritten();
+                }
+            }, 100); // 100ms delay to allow any pending callbacks to fire
         }
     };
 
