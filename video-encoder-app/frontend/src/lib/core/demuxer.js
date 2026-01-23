@@ -5,7 +5,7 @@ import MP4Box from 'mp4box';
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder
- * @param {(hasAudio: boolean)=>void} onReady - Called when metadata is ready with audio availability info
+ * @param {(detectedFormat: {hasAudio: boolean, audioFormat?: {sampleRate: number, numberOfChannels: number}})=>void} onReady - Called when metadata is ready with detected format info
  * @param {(pct:number)=>void} onProgress
  * @returns {Promise<{hasAudio: boolean}>}
  */
@@ -15,6 +15,7 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         let videoTrackId = null;
         let audioTrackId = null;
         let hasAudio = false;
+        let detectedAudioFormat = null;
 
         mp4boxfile.onReady = (info) => {
             const videoTrack = info.videoTracks?.[0];
@@ -35,6 +36,10 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             if (audioTrack && audioDecoder) {
                 hasAudio = true;
                 audioTrackId = audioTrack.id;
+                detectedAudioFormat = {
+                    sampleRate: audioTrack.audio.sample_rate,
+                    numberOfChannels: audioTrack.audio.channel_count
+                };
                 audioDecoder.configure({
                     codec: audioTrack.codec,
                     sampleRate: audioTrack.audio.sample_rate,
@@ -43,8 +48,11 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
             }
 
-            // Call the onReady callback to initialize encoders and muxer
-            onReady(hasAudio);
+            // Call the onReady callback to initialize encoders and muxer with detected format
+            onReady({
+                hasAudio,
+                audioFormat: detectedAudioFormat
+            });
 
             mp4boxfile.start();
         };
