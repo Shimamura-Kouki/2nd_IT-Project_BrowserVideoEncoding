@@ -78,6 +78,13 @@ export async function encodeToFile(file, config, onProgress) {
             console.warn('Video flipping is not yet implemented and will be ignored.');
         }
         
+        // Determine output framerate
+        let outputFramerate = config.video.framerate;
+        if (config.video.framerateMode === 'original' && videoFormat?.framerate) {
+            outputFramerate = videoFormat.framerate;
+            console.log(`Using original framerate: ${outputFramerate.toFixed(2)} fps`);
+        }
+        
         // Calculate actual output dimensions to prevent upscaling
         let outputWidth = config.video.width;
         let outputHeight = config.video.height;
@@ -160,7 +167,7 @@ export async function encodeToFile(file, config, onProgress) {
             width: outputWidth,
             height: outputHeight,
             bitrate: config.video.bitrate,
-            framerate: config.video.framerate,
+            framerate: outputFramerate,
             latencyMode: 'quality'
         });
 

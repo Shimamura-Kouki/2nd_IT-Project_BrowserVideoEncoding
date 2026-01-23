@@ -8,7 +8,7 @@ const DEMUX_PROGRESS_PERCENTAGE = 10;
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder
- * @param {(detectedFormat: {hasAudio: boolean, audioFormat?: {sampleRate: number, numberOfChannels: number}, videoFormat?: {width: number, height: number, codec: string}, totalFrames: number})=>void} onReady - Called when metadata is ready with detected format info
+ * @param {(detectedFormat: {hasAudio: boolean, audioFormat?: {sampleRate: number, numberOfChannels: number}, videoFormat?: {width: number, height: number, codec: string, framerate: number|null}, totalFrames: number})=>void} onReady - Called when metadata is ready with detected format info
  * @param {(pct:number)=>void} onProgress
  * @returns {Promise<{hasAudio: boolean}>}
  */
@@ -31,7 +31,10 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 detectedVideoFormat = {
                     width: videoTrack.video.width,
                     height: videoTrack.video.height,
-                    codec: videoTrack.codec
+                    codec: videoTrack.codec,
+                    framerate: videoTrack.movie_duration && videoTrack.nb_samples 
+                        ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
+                        : null
                 };
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);

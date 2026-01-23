@@ -27,6 +27,8 @@
   let widthOnly = 1920;
   let heightOnly = 1080;
   
+  // Frame rate settings
+  let framerateMode = 'manual'; // 'original', 'manual'
   let framerate = 30;
   let videoBitrate = 5000; // in Kbps
   let audioBitrate = 128; // in Kbps
@@ -53,7 +55,10 @@
   function applyPreset() {
     const preset = presets[selectedPresetIndex]?.config_json ?? presets[selectedPresetIndex];
     if (preset) {
+      // Apply all preset settings to detailed mode
+      containerFormat = preset.container ?? 'mp4';
       videoCodec = preset.codec ?? 'avc1.640028';
+      audioCodec = preset.audioCodec ?? 'mp4a.40.2';
       videoBitrate = (preset.bitrate ?? 5_000_000) / 1000;
       audioBitrate = (preset.audio_bitrate ?? 128_000) / 1000;
       framerate = preset.framerate ?? 30;
@@ -61,6 +66,14 @@
       if (preset.width && preset.height) {
         manualWidth = preset.width;
         manualHeight = preset.height;
+        
+        // Find matching preset resolution
+        const matchingPreset = Object.entries(resolutionPresets).find(
+          ([_, res]) => res.width === preset.width && res.height === preset.height
+        );
+        if (matchingPreset) {
+          resolutionPreset = matchingPreset[0];
+        }
       }
     }
   }
@@ -95,6 +108,7 @@
         height: height, 
         bitrate: videoBitrate * 1000, 
         framerate: framerate,
+        framerateMode: framerateMode,
         rotation: rotation,
         flipHorizontal: flipHorizontal,
         flipVertical: flipVertical
@@ -359,17 +373,37 @@
         <div class="row">
           <label>動画コーデック:</label>
           <select bind:value={videoCodec}>
-            <option value="avc1.640028">H.264 High Profile (avc1.640028)</option>
-            <option value="avc1.42001f">H.264 Baseline (avc1.42001f)</option>
-            <option value="avc1.4d001f">H.264 Main Profile (avc1.4d001f)</option>
+            <optgroup label="H.264 (AVC)">
+              <option value="avc1.640028">H.264 High Profile</option>
+              <option value="avc1.4d001f">H.264 Main Profile</option>
+              <option value="avc1.42001f">H.264 Baseline Profile</option>
+              <option value="avc1.42001e">H.264 Baseline Level 3.0</option>
+            </optgroup>
+            <optgroup label="H.265 (HEVC)">
+              <option value="hev1.1.6.L93.B0">H.265 Main Profile</option>
+              <option value="hvc1.1.6.L93.B0">H.265 Main (hvc1)</option>
+            </optgroup>
+            <optgroup label="VP9">
+              <option value="vp09.00.31.08">VP9 Profile 0</option>
+              <option value="vp09.00.41.08">VP9 Profile 0 Level 4.1</option>
+            </optgroup>
+            <optgroup label="AV1">
+              <option value="av01.0.05M.08">AV1 Main Profile Level 3.1</option>
+              <option value="av01.0.04M.08">AV1 Main Profile Level 3.0</option>
+            </optgroup>
           </select>
         </div>
 
         <div class="row">
           <label>音声コーデック:</label>
           <select bind:value={audioCodec}>
-            <option value="mp4a.40.2">AAC-LC (mp4a.40.2)</option>
-            <option value="mp4a.40.5">AAC-HE (mp4a.40.5)</option>
+            <optgroup label="AAC">
+              <option value="mp4a.40.2">AAC-LC</option>
+              <option value="mp4a.40.5">AAC-HE</option>
+            </optgroup>
+            <optgroup label="Opus (WebM)">
+              <option value="opus">Opus</option>
+            </optgroup>
           </select>
         </div>
 
@@ -419,9 +453,19 @@
         {/if}
 
         <div class="row">
-          <label>フレームレート (fps):</label>
-          <input type="number" bind:value={framerate} min="1" max="120" step="1" />
+          <label>フレームレートモード:</label>
+          <select bind:value={framerateMode}>
+            <option value="original">元のフレームレートを保持</option>
+            <option value="manual">手動指定</option>
+          </select>
         </div>
+
+        {#if framerateMode === 'manual'}
+          <div class="row">
+            <label>フレームレート (fps):</label>
+            <input type="number" bind:value={framerate} min="1" max="120" step="1" />
+          </div>
+        {/if}
 
         <div class="row">
           <label>映像ビットレート (Kbps):</label>
