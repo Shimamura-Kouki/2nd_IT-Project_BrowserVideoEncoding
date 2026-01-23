@@ -19,6 +19,7 @@ export async function encodeToFile(file, config, onProgress) {
     let videoEncoder = null;
     let audioEncoder = null;
     let frameCount = 0;
+    let totalFrames = 0; // Total frames to encode
     const start = performance.now();
     
     // Timeout delay to ensure all encoder output callbacks complete before finalization
@@ -62,7 +63,8 @@ export async function encodeToFile(file, config, onProgress) {
 
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
-        const { hasAudio, audioFormat } = detectedFormat;
+        const { hasAudio, audioFormat, totalFrames: frames } = detectedFormat;
+        totalFrames = frames || 0; // Store total frames for progress calculation
         
         // Create muxer with appropriate configuration
         const muxerConfig = {
@@ -144,7 +146,15 @@ export async function encodeToFile(file, config, onProgress) {
             frame.close();
             const elapsedMs = performance.now() - start;
             const fps = frameCount / (elapsedMs / 1000);
-            onProgress(undefined, { fps, elapsedMs });
+            
+            // Calculate progress: 10% for demuxing (already done) + 90% for encoding
+            // Encoding progress is based on frames processed vs total frames
+            let encodingProgress = 10; // Start at 10% (demuxing complete)
+            if (totalFrames > 0) {
+                encodingProgress = 10 + (frameCount / totalFrames) * 90;
+            }
+            
+            onProgress(encodingProgress, { fps, elapsedMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
     });
@@ -175,6 +185,9 @@ export async function encodeToFile(file, config, onProgress) {
     
     // Wait for all pending chunks to be written to muxer
     await allChunksWrittenPromise;
+    
+    // Set progress to 100% when encoding is complete
+    onProgress(100);
     
     // Now safe to finalize - all chunks have been written
     muxer.finalize();

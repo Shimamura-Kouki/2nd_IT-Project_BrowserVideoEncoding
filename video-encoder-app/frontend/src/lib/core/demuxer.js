@@ -5,7 +5,7 @@ import MP4Box from 'mp4box';
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder
- * @param {(detectedFormat: {hasAudio: boolean, audioFormat?: {sampleRate: number, numberOfChannels: number}})=>void} onReady - Called when metadata is ready with detected format info
+ * @param {(detectedFormat: {hasAudio: boolean, audioFormat?: {sampleRate: number, numberOfChannels: number}, totalFrames: number})=>void} onReady - Called when metadata is ready with detected format info
  * @param {(pct:number)=>void} onProgress
  * @returns {Promise<{hasAudio: boolean}>}
  */
@@ -16,11 +16,14 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         let audioTrackId = null;
         let hasAudio = false;
         let detectedAudioFormat = null;
+        let totalFrames = 0;
 
         mp4boxfile.onReady = (info) => {
             const videoTrack = info.videoTracks?.[0];
             if (videoTrack) {
                 videoTrackId = videoTrack.id;
+                // Calculate total frames from track info
+                totalFrames = videoTrack.nb_samples || 0;
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);
                 videoDecoder.configure({
@@ -51,7 +54,8 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             // Call the onReady callback to initialize encoders and muxer with detected format
             onReady({
                 hasAudio,
-                audioFormat: detectedAudioFormat
+                audioFormat: detectedAudioFormat,
+                totalFrames
             });
 
             mp4boxfile.start();
@@ -90,7 +94,10 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         buffer.fileStart = offset;
         mp4boxfile.appendBuffer(buffer);
         offset += buffer.byteLength;
-        onProgress(Math.min(100, (offset / file.size) * 100));
+        // Demuxing should contribute only 10% of total progress
+        // The remaining 90% will be for encoding
+        const demuxProgress = Math.min(10, (offset / file.size) * 10);
+        onProgress(demuxProgress);
         if (offset < file.size) {
             readNextChunk();
         } else {
