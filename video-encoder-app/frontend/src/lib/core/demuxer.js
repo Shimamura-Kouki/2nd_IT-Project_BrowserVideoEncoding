@@ -1,5 +1,8 @@
 import MP4Box from 'mp4box';
 
+// Progress contribution: demuxing contributes 10% of total progress, encoding 90%
+const DEMUX_PROGRESS_PERCENTAGE = 10;
+
 /**
  * 入力MP4を解析し、WebCodecsのデコーダへ供給する
  * @param {File} file
@@ -23,7 +26,7 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             if (videoTrack) {
                 videoTrackId = videoTrack.id;
                 // Calculate total frames from track info
-                totalFrames = videoTrack.nb_samples || 0;
+                totalFrames = videoTrack.nb_samples ?? 0;
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);
                 videoDecoder.configure({
@@ -94,9 +97,9 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         buffer.fileStart = offset;
         mp4boxfile.appendBuffer(buffer);
         offset += buffer.byteLength;
-        // Demuxing should contribute only 10% of total progress
-        // The remaining 90% will be for encoding
-        const demuxProgress = Math.min(10, (offset / file.size) * 10);
+        // Demuxing should contribute only a portion of total progress
+        // The remaining will be for encoding
+        const demuxProgress = Math.min(DEMUX_PROGRESS_PERCENTAGE, (offset / file.size) * DEMUX_PROGRESS_PERCENTAGE);
         onProgress(demuxProgress);
         if (offset < file.size) {
             readNextChunk();

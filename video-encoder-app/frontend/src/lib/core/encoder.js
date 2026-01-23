@@ -1,6 +1,10 @@
 import { Muxer, FileSystemWritableFileStreamTarget } from 'mp4-muxer';
 import { demuxAndDecode } from './demuxer.js';
 
+// Progress contribution: demuxing contributes 10% of total progress, encoding 90%
+const DEMUX_PROGRESS_PERCENTAGE = 10;
+const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
+
 /**
  * ブラウザ内でエンコードし、FileSystem APIへストリーム保存
  * @param {File} file
@@ -64,7 +68,7 @@ export async function encodeToFile(file, config, onProgress) {
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
         const { hasAudio, audioFormat, totalFrames: frames } = detectedFormat;
-        totalFrames = frames || 0; // Store total frames for progress calculation
+        totalFrames = frames ?? 0; // Store total frames for progress calculation
         
         // Create muxer with appropriate configuration
         const muxerConfig = {
@@ -147,11 +151,11 @@ export async function encodeToFile(file, config, onProgress) {
             const elapsedMs = performance.now() - start;
             const fps = frameCount / (elapsedMs / 1000);
             
-            // Calculate progress: 10% for demuxing (already done) + 90% for encoding
+            // Calculate progress: DEMUX_PROGRESS_PERCENTAGE for demuxing (already done) + remaining for encoding
             // Encoding progress is based on frames processed vs total frames
-            let encodingProgress = 10; // Start at 10% (demuxing complete)
+            let encodingProgress = DEMUX_PROGRESS_PERCENTAGE; // Start at demuxing complete
             if (totalFrames > 0) {
-                encodingProgress = 10 + (frameCount / totalFrames) * 90;
+                encodingProgress = DEMUX_PROGRESS_PERCENTAGE + (frameCount / totalFrames) * ENCODING_PROGRESS_PERCENTAGE;
             }
             
             onProgress(encodingProgress, { fps, elapsedMs });
