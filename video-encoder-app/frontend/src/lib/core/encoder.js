@@ -22,6 +22,8 @@ export async function encodeToFile(file, config, onProgress) {
     const start = performance.now();
     
     // Track pending chunks to ensure all are written before finalization
+    // This prevents the race condition where muxer.finalize() is called
+    // while encoder output callbacks are still adding chunks
     let pendingVideoChunks = 0;
     let pendingAudioChunks = 0;
     let encodingComplete = false;
@@ -30,7 +32,13 @@ export async function encodeToFile(file, config, onProgress) {
         resolveAllChunksWritten = resolve;
     });
 
-    // Helper to check if all chunks are written
+    /**
+     * Check if all chunks have been written to the muxer
+     * Resolves the allChunksWrittenPromise when:
+     * - Encoding is marked complete (after encoder flush)
+     * - No pending video chunks
+     * - No pending audio chunks
+     */
     const checkIfComplete = () => {
         if (encodingComplete && pendingVideoChunks === 0 && pendingAudioChunks === 0) {
             resolveAllChunksWritten();
