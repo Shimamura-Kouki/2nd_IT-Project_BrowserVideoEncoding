@@ -20,22 +20,65 @@ export async function encodeToFile(file, config, onProgress) {
     let audioEncoder = null;
     let frameCount = 0;
     const start = performance.now();
+    
+    // Timeout delay to ensure all encoder output callbacks complete before finalization
+    const COMPLETION_CHECK_DELAY_MS = 100;
+    
+    // Track pending chunks to ensure all are written before finalization
+    // This prevents the race condition where muxer.finalize() is called
+    // while encoder output callbacks are still adding chunks
+    let pendingVideoChunks = 0;
+    let pendingAudioChunks = 0;
+    let encodingComplete = false;
+    let resolveAllChunksWritten;
+    const allChunksWrittenPromise = new Promise(resolve => {
+        resolveAllChunksWritten = resolve;
+    });
+    let completionCheckTimeout = null;
 
-    // Callback to initialize muxer and encoders once we know if source has audio
-    const initializeEncoders = (hasAudio) => {
+    /**
+     * Check if all chunks have been written to the muxer
+     * Resolves the allChunksWrittenPromise when:
+     * - Encoding is marked complete (after encoder flush)
+     * - No pending video chunks
+     * - No pending audio chunks
+     * - A brief delay has passed to ensure no more chunks are coming
+     */
+    const checkIfComplete = () => {
+        if (encodingComplete && pendingVideoChunks === 0 && pendingAudioChunks === 0) {
+            // Clear any existing timeout
+            if (completionCheckTimeout) {
+                clearTimeout(completionCheckTimeout);
+            }
+            // Wait a brief moment to ensure no more chunks are coming from the encoder
+            completionCheckTimeout = setTimeout(() => {
+                // Double-check the counters after the delay
+                if (pendingVideoChunks === 0 && pendingAudioChunks === 0) {
+                    resolveAllChunksWritten();
+                }
+            }, COMPLETION_CHECK_DELAY_MS);
+        }
+    };
+
+    // Callback to initialize muxer and encoders once we know the detected format
+    const initializeEncoders = (detectedFormat) => {
+        const { hasAudio, audioFormat } = detectedFormat;
+        
         // Create muxer with appropriate configuration
         const muxerConfig = {
             target: new FileSystemWritableFileStreamTarget(fileStream),
             video: { codec: 'avc', width: config.video.width, height: config.video.height },
-            fastStart: false
+            fastStart: false,
+            firstTimestampBehavior: 'offset'
         };
 
         // Only add audio track if source has audio AND config includes audio
-        if (hasAudio && config.audio) {
+        // Use detected audio format from source file, not preset
+        if (hasAudio && config.audio && audioFormat) {
             muxerConfig.audio = {
                 codec: 'aac',
-                sampleRate: config.audio.sampleRate,
-                numberOfChannels: config.audio.numberOfChannels
+                sampleRate: audioFormat.sampleRate,
+                numberOfChannels: audioFormat.numberOfChannels
             };
         }
 
@@ -43,7 +86,13 @@ export async function encodeToFile(file, config, onProgress) {
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
-                muxer.addVideoChunk(chunk, meta);
+                pendingVideoChunks++;
+                try {
+                    muxer.addVideoChunk(chunk, meta);
+                } finally {
+                    pendingVideoChunks--;
+                    checkIfComplete();
+                }
             },
             error: (e) => console.error('VideoEncoder error', e)
         });
@@ -57,18 +106,26 @@ export async function encodeToFile(file, config, onProgress) {
             latencyMode: 'quality'
         });
 
-        if (hasAudio && config.audio) {
+        if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
-                    muxer.addAudioChunk(chunk, meta);
+                    pendingAudioChunks++;
+                    try {
+                        muxer.addAudioChunk(chunk, meta);
+                    } finally {
+                        pendingAudioChunks--;
+                        checkIfComplete();
+                    }
                 },
                 error: (e) => console.error('AudioEncoder error', e)
             });
 
+            // Configure AudioEncoder with detected format from source file
+            // This ensures compatibility with decoded audio data
             audioEncoder.configure({
                 codec: config.audio.codec ?? 'mp4a.40.2',
-                sampleRate: config.audio.sampleRate,
-                numberOfChannels: config.audio.numberOfChannels,
+                sampleRate: audioFormat.sampleRate,
+                numberOfChannels: audioFormat.numberOfChannels,
                 bitrate: config.audio.bitrate
             });
         }
@@ -108,8 +165,18 @@ export async function encodeToFile(file, config, onProgress) {
 
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
 
+    // Flush encoders and wait for all output callbacks to complete
     await videoEncoder.flush();
     if (audioEncoder) await audioEncoder.flush();
+    
+    // Mark encoding as complete and check if we can finalize
+    encodingComplete = true;
+    checkIfComplete();
+    
+    // Wait for all pending chunks to be written to muxer
+    await allChunksWrittenPromise;
+    
+    // Now safe to finalize - all chunks have been written
     muxer.finalize();
     await fileStream.close();
 }
