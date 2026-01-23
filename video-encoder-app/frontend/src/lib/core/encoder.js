@@ -9,7 +9,7 @@ const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
  * ブラウザ内でエンコードし、FileSystem APIへストリーム保存
  * @param {File} file
  * @param {{ video: { width:number, height:number, bitrate:number, framerate:number, codec:string }, audio?: { sampleRate:number, numberOfChannels:number, bitrate:number, codec:string } }} config
- * @param {(pct:number, stats?:{fps:number, elapsedMs:number})=>void} onProgress
+ * @param {(pct:number, stats?:{fps:number, elapsedMs:number, etaMs?:number})=>void} onProgress
  * @returns {Promise<void>}
  */
 export async function encodeToFile(file, config, onProgress) {
@@ -158,7 +158,15 @@ export async function encodeToFile(file, config, onProgress) {
                 encodingProgress = DEMUX_PROGRESS_PERCENTAGE + (frameCount / totalFrames) * ENCODING_PROGRESS_PERCENTAGE;
             }
             
-            onProgress(encodingProgress, { fps, elapsedMs });
+            // Calculate estimated time to completion (ETA)
+            let etaMs = 0;
+            if (totalFrames > 0 && frameCount > 0 && frameCount < totalFrames) {
+                const progressRatio = frameCount / totalFrames;
+                const estimatedTotalMs = elapsedMs / progressRatio;
+                etaMs = estimatedTotalMs - elapsedMs;
+            }
+            
+            onProgress(encodingProgress, { fps, elapsedMs, etaMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
     });
@@ -180,8 +188,19 @@ export async function encodeToFile(file, config, onProgress) {
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
 
     // Flush encoders and wait for all output callbacks to complete
-    await videoEncoder.flush();
-    if (audioEncoder) await audioEncoder.flush();
+    try {
+        await videoEncoder.flush();
+    } catch (e) {
+        console.error('VideoEncoder flush error:', e);
+    }
+    
+    if (audioEncoder) {
+        try {
+            await audioEncoder.flush();
+        } catch (e) {
+            console.error('AudioEncoder flush error:', e);
+        }
+    }
     
     // Mark encoding as complete and check if we can finalize
     encodingComplete = true;

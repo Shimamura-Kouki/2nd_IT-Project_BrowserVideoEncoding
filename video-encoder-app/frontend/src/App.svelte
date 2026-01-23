@@ -9,6 +9,7 @@
   let progressPct = 0;
   let fps = 0;
   let elapsedMs = 0;
+  let etaMs = 0;
   let encoding = false;
   let message = '';
 
@@ -32,9 +33,13 @@
     };
 
     const start = performance.now();
-    await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number }) => {
+    await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number, etaMs?: number }) => {
       if (pct !== undefined) progressPct = pct;
-      if (stats) { fps = stats.fps; elapsedMs = stats.elapsedMs; }
+      if (stats) { 
+        fps = stats.fps; 
+        elapsedMs = stats.elapsedMs;
+        etaMs = stats.etaMs ?? 0;
+      }
     });
 
     const end = performance.now();
@@ -225,6 +230,9 @@
         <div class="progress"><div style="width:{progressPct}%"></div></div>
         <p>進捗: {Math.round(progressPct)}%</p>
         <p>FPS: {fps > 0 ? fps.toFixed(1) : '-'} | 経過: {(elapsedMs/1000).toFixed(1)}s</p>
+        {#if etaMs > 0 && progressPct < 100}
+          <p>推定残り時間: {(etaMs/1000).toFixed(1)}s</p>
+        {/if}
       </div>
     {/if}
 
