@@ -21,8 +21,10 @@ export async function encodeToFile(file, config, onProgress) {
     let frameCount = 0;
     const start = performance.now();
 
-    // Callback to initialize muxer and encoders once we know if source has audio
-    const initializeEncoders = (hasAudio) => {
+    // Callback to initialize muxer and encoders once we know the detected format
+    const initializeEncoders = (detectedFormat) => {
+        const { hasAudio, audioFormat } = detectedFormat;
+        
         // Create muxer with appropriate configuration
         const muxerConfig = {
             target: new FileSystemWritableFileStreamTarget(fileStream),
@@ -31,11 +33,12 @@ export async function encodeToFile(file, config, onProgress) {
         };
 
         // Only add audio track if source has audio AND config includes audio
-        if (hasAudio && config.audio) {
+        // Use detected audio format from source file, not preset
+        if (hasAudio && config.audio && audioFormat) {
             muxerConfig.audio = {
                 codec: 'aac',
-                sampleRate: config.audio.sampleRate,
-                numberOfChannels: config.audio.numberOfChannels
+                sampleRate: audioFormat.sampleRate,
+                numberOfChannels: audioFormat.numberOfChannels
             };
         }
 
@@ -59,7 +62,7 @@ export async function encodeToFile(file, config, onProgress) {
             latencyMode: 'quality'
         });
 
-        if (hasAudio && config.audio) {
+        if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
                     muxer.addAudioChunk(chunk, meta);
@@ -67,10 +70,12 @@ export async function encodeToFile(file, config, onProgress) {
                 error: (e) => console.error('AudioEncoder error', e)
             });
 
+            // Configure AudioEncoder with detected format from source file
+            // This ensures compatibility with decoded audio data
             audioEncoder.configure({
                 codec: config.audio.codec ?? 'mp4a.40.2',
-                sampleRate: config.audio.sampleRate,
-                numberOfChannels: config.audio.numberOfChannels,
+                sampleRate: audioFormat.sampleRate,
+                numberOfChannels: audioFormat.numberOfChannels,
                 bitrate: config.audio.bitrate
             });
         }
