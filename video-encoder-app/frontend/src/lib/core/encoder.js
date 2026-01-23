@@ -20,6 +20,22 @@ export async function encodeToFile(file, config, onProgress) {
     let audioEncoder = null;
     let frameCount = 0;
     const start = performance.now();
+    
+    // Track pending chunks to ensure all are written before finalization
+    let pendingVideoChunks = 0;
+    let pendingAudioChunks = 0;
+    let encodingComplete = false;
+    let resolveAllChunksWritten;
+    const allChunksWrittenPromise = new Promise(resolve => {
+        resolveAllChunksWritten = resolve;
+    });
+
+    // Helper to check if all chunks are written
+    const checkIfComplete = () => {
+        if (encodingComplete && pendingVideoChunks === 0 && pendingAudioChunks === 0) {
+            resolveAllChunksWritten();
+        }
+    };
 
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
@@ -48,7 +64,13 @@ export async function encodeToFile(file, config, onProgress) {
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
-                muxer.addVideoChunk(chunk, meta);
+                pendingVideoChunks++;
+                try {
+                    muxer.addVideoChunk(chunk, meta);
+                } finally {
+                    pendingVideoChunks--;
+                    checkIfComplete();
+                }
             },
             error: (e) => console.error('VideoEncoder error', e)
         });
@@ -65,7 +87,13 @@ export async function encodeToFile(file, config, onProgress) {
         if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
-                    muxer.addAudioChunk(chunk, meta);
+                    pendingAudioChunks++;
+                    try {
+                        muxer.addAudioChunk(chunk, meta);
+                    } finally {
+                        pendingAudioChunks--;
+                        checkIfComplete();
+                    }
                 },
                 error: (e) => console.error('AudioEncoder error', e)
             });
@@ -115,8 +143,18 @@ export async function encodeToFile(file, config, onProgress) {
 
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
 
+    // Flush encoders and wait for all output callbacks to complete
     await videoEncoder.flush();
     if (audioEncoder) await audioEncoder.flush();
+    
+    // Mark encoding as complete and check if we can finalize
+    encodingComplete = true;
+    checkIfComplete();
+    
+    // Wait for all pending chunks to be written to muxer
+    await allChunksWrittenPromise;
+    
+    // Now safe to finalize - all chunks have been written
     muxer.finalize();
     await fileStream.close();
 }
