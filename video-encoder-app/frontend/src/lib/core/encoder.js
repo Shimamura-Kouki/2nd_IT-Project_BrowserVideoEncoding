@@ -21,6 +21,9 @@ export async function encodeToFile(file, config, onProgress) {
     let frameCount = 0;
     const start = performance.now();
     
+    // Timeout delay to ensure all encoder output callbacks complete before finalization
+    const COMPLETION_CHECK_DELAY_MS = 100;
+    
     // Track pending chunks to ensure all are written before finalization
     // This prevents the race condition where muxer.finalize() is called
     // while encoder output callbacks are still adding chunks
@@ -53,7 +56,7 @@ export async function encodeToFile(file, config, onProgress) {
                 if (pendingVideoChunks === 0 && pendingAudioChunks === 0) {
                     resolveAllChunksWritten();
                 }
-            }, 100); // 100ms delay to allow any pending callbacks to fire
+            }, COMPLETION_CHECK_DELAY_MS);
         }
     };
 
