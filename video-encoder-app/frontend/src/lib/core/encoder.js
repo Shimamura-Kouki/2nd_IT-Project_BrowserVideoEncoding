@@ -67,13 +67,57 @@ export async function encodeToFile(file, config, onProgress) {
 
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
-        const { hasAudio, audioFormat, totalFrames: frames } = detectedFormat;
+        const { hasAudio, audioFormat, videoFormat, totalFrames: frames } = detectedFormat;
         totalFrames = frames ?? 0; // Store total frames for progress calculation
+        
+        // Calculate actual output dimensions to prevent upscaling
+        let outputWidth = config.video.width;
+        let outputHeight = config.video.height;
+        
+        if (videoFormat) {
+            const originalWidth = videoFormat.width;
+            const originalHeight = videoFormat.height;
+            const originalAspectRatio = originalWidth / originalHeight;
+            
+            // If only width is specified (height is null/undefined), calculate height
+            if (outputWidth && !outputHeight) {
+                outputHeight = Math.round(outputWidth / originalAspectRatio);
+            }
+            // If only height is specified (width is null/undefined), calculate width
+            else if (!outputWidth && outputHeight) {
+                outputWidth = Math.round(outputHeight * originalAspectRatio);
+            }
+            // If both are specified, maintain aspect ratio by fitting to the smaller dimension
+            else if (outputWidth && outputHeight) {
+                const targetAspectRatio = outputWidth / outputHeight;
+                if (Math.abs(targetAspectRatio - originalAspectRatio) > 0.01) {
+                    // Aspect ratios don't match, fit to maintain original ratio
+                    if (targetAspectRatio > originalAspectRatio) {
+                        // Target is wider, constrain by height
+                        outputWidth = Math.round(outputHeight * originalAspectRatio);
+                    } else {
+                        // Target is taller, constrain by width
+                        outputHeight = Math.round(outputWidth / originalAspectRatio);
+                    }
+                }
+            }
+            
+            // Prevent upscaling: don't exceed original dimensions
+            if (outputWidth > originalWidth || outputHeight > originalHeight) {
+                const scale = Math.min(originalWidth / outputWidth, originalHeight / outputHeight);
+                outputWidth = Math.round(outputWidth * scale);
+                outputHeight = Math.round(outputHeight * scale);
+            }
+            
+            // Ensure dimensions are even numbers (required for many codecs)
+            outputWidth = Math.round(outputWidth / 2) * 2;
+            outputHeight = Math.round(outputHeight / 2) * 2;
+        }
         
         // Create muxer with appropriate configuration
         const muxerConfig = {
             target: new FileSystemWritableFileStreamTarget(fileStream),
-            video: { codec: 'avc', width: config.video.width, height: config.video.height },
+            video: { codec: 'avc', width: outputWidth, height: outputHeight },
             fastStart: false,
             firstTimestampBehavior: 'offset'
         };
@@ -105,8 +149,8 @@ export async function encodeToFile(file, config, onProgress) {
 
         videoEncoder.configure({
             codec: config.video.codec ?? 'avc1.640028',
-            width: config.video.width,
-            height: config.video.height,
+            width: outputWidth,
+            height: outputHeight,
             bitrate: config.video.bitrate,
             framerate: config.video.framerate,
             latencyMode: 'quality'
