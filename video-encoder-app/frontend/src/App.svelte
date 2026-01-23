@@ -6,6 +6,7 @@
   let file: File | null = null;
   let presets: any[] = [];
   let selectedPresetIndex = 0;
+  let usePreset = true;
   let progressPct = 0;
   let fps = 0;
   let elapsedMs = 0;
@@ -13,23 +14,97 @@
   let encoding = false;
   let message = '';
 
+  // Required settings
+  let containerFormat = 'mp4';
+  let videoCodec = 'avc1.640028';
+  let audioCodec = 'mp4a.40.2';
+  
+  // Resolution settings
+  let resolutionMode = 'preset'; // 'preset', 'manual', 'width-only', 'height-only'
+  let resolutionPreset = '1080p';
+  let manualWidth = 1920;
+  let manualHeight = 1080;
+  let widthOnly = 1920;
+  let heightOnly = 1080;
+  
+  let framerate = 30;
+  let videoBitrate = 5000; // in Kbps
+  let audioBitrate = 128; // in Kbps
+
+  // Optional settings
+  let rotation = 0;
+  let flipHorizontal = false;
+  let flipVertical = false;
+
+  const resolutionPresets = {
+    '2160p': { width: 3840, height: 2160 },
+    '1440p': { width: 2560, height: 1440 },
+    '1080p': { width: 1920, height: 1080 },
+    '720p': { width: 1280, height: 720 },
+    '480p': { width: 854, height: 480 },
+    '360p': { width: 640, height: 360 }
+  };
+
   const pickFile = (e: Event) => {
     const input = e.target as HTMLInputElement;
     file = input.files?.[0] ?? null;
   };
+
+  function applyPreset() {
+    const preset = presets[selectedPresetIndex]?.config_json ?? presets[selectedPresetIndex];
+    if (preset) {
+      videoCodec = preset.codec ?? 'avc1.640028';
+      videoBitrate = (preset.bitrate ?? 5_000_000) / 1000;
+      audioBitrate = (preset.audio_bitrate ?? 128_000) / 1000;
+      framerate = preset.framerate ?? 30;
+      
+      if (preset.width && preset.height) {
+        manualWidth = preset.width;
+        manualHeight = preset.height;
+      }
+    }
+  }
 
   async function startEncoding() {
     if (!file) return;
     message = '';
     encoding = true;
 
-    const preset = presets[selectedPresetIndex]?.config_json ?? presets[selectedPresetIndex] ?? {
-        codec: 'avc1.640028', width: 1920, height: 1080, bitrate: 5_000_000, framerate: 30, audio_bitrate: 128_000
-    };
+    let width: number | undefined;
+    let height: number | undefined;
+
+    if (resolutionMode === 'preset') {
+      const res = resolutionPresets[resolutionPreset];
+      width = res.width;
+      height = res.height;
+    } else if (resolutionMode === 'manual') {
+      width = manualWidth;
+      height = manualHeight;
+    } else if (resolutionMode === 'width-only') {
+      width = widthOnly;
+      height = undefined;
+    } else if (resolutionMode === 'height-only') {
+      width = undefined;
+      height = heightOnly;
+    }
 
     const config = {
-      video: { codec: preset.codec, width: preset.width, height: preset.height, bitrate: preset.bitrate, framerate: preset.framerate },
-      audio: { codec: 'mp4a.40.2', sampleRate: 44100, numberOfChannels: 2, bitrate: preset.audio_bitrate ?? 128000 }
+      video: { 
+        codec: videoCodec, 
+        width: width, 
+        height: height, 
+        bitrate: videoBitrate * 1000, 
+        framerate: framerate,
+        rotation: rotation,
+        flipHorizontal: flipHorizontal,
+        flipVertical: flipVertical
+      },
+      audio: { 
+        codec: audioCodec, 
+        sampleRate: 44100, 
+        numberOfChannels: 2, 
+        bitrate: audioBitrate * 1000 
+      }
     };
 
     const start = performance.now();
@@ -193,6 +268,42 @@
     color: #666;
     font-size: 14px;
   }
+
+  .section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #2979ff;
+  }
+
+  .checkbox-group {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: auto;
+    min-width: auto;
+  }
+
+  .row input[type="number"] {
+    flex: 0 1 150px;
+  }
+
+  .preset-toggle {
+    margin-bottom: 16px;
+  }
+
 </style>
 
 <div class="container">
@@ -210,16 +321,148 @@
   {/if}
 
   {#if presets.length > 0}
-    <div class="panel">
+    <div class="panel preset-toggle">
       <div class="row">
-        <label>プリセット:</label>
-        <select bind:value={selectedPresetIndex}>
-          {#each presets as p, i}
-            <option value={i}>{p.name}</option>
-          {/each}
+        <label>設定モード:</label>
+        <select bind:value={usePreset} on:change={() => usePreset && applyPreset()}>
+          <option value={true}>プリセット使用</option>
+          <option value={false}>詳細設定</option>
         </select>
       </div>
+      
+      {#if usePreset}
+        <div class="row">
+          <label>プリセット:</label>
+          <select bind:value={selectedPresetIndex} on:change={applyPreset}>
+            {#each presets as p, i}
+              <option value={i}>{p.name}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
     </div>
+
+    {#if !usePreset}
+      <!-- Required Settings -->
+      <div class="panel">
+        <h3 class="section-title">必須設定</h3>
+        
+        <div class="row">
+          <label>コンテナ形式:</label>
+          <select bind:value={containerFormat}>
+            <option value="mp4">MP4</option>
+            <option value="mov">MOV</option>
+            <option value="webm">WebM</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>動画コーデック:</label>
+          <select bind:value={videoCodec}>
+            <option value="avc1.640028">H.264 High Profile (avc1.640028)</option>
+            <option value="avc1.42001f">H.264 Baseline (avc1.42001f)</option>
+            <option value="avc1.4d001f">H.264 Main Profile (avc1.4d001f)</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>音声コーデック:</label>
+          <select bind:value={audioCodec}>
+            <option value="mp4a.40.2">AAC-LC (mp4a.40.2)</option>
+            <option value="mp4a.40.5">AAC-HE (mp4a.40.5)</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>解像度モード:</label>
+          <select bind:value={resolutionMode}>
+            <option value="preset">プリセット</option>
+            <option value="manual">手動指定(幅×高さ)</option>
+            <option value="width-only">幅のみ指定</option>
+            <option value="height-only">高さのみ指定</option>
+          </select>
+        </div>
+
+        {#if resolutionMode === 'preset'}
+          <div class="row">
+            <label>解像度プリセット:</label>
+            <select bind:value={resolutionPreset}>
+              <option value="2160p">4K (3840×2160)</option>
+              <option value="1440p">1440p (2560×1440)</option>
+              <option value="1080p">1080p (1920×1080)</option>
+              <option value="720p">720p (1280×720)</option>
+              <option value="480p">480p (854×480)</option>
+              <option value="360p">360p (640×360)</option>
+            </select>
+          </div>
+        {:else if resolutionMode === 'manual'}
+          <div class="row">
+            <label>幅 (px):</label>
+            <input type="number" bind:value={manualWidth} min="64" max="7680" step="2" />
+          </div>
+          <div class="row">
+            <label>高さ (px):</label>
+            <input type="number" bind:value={manualHeight} min="64" max="4320" step="2" />
+          </div>
+        {:else if resolutionMode === 'width-only'}
+          <div class="row">
+            <label>幅 (px):</label>
+            <input type="number" bind:value={widthOnly} min="64" max="7680" step="2" />
+            <p style="color: #999; font-size: 12px;">高さは元の比率から自動計算されます</p>
+          </div>
+        {:else if resolutionMode === 'height-only'}
+          <div class="row">
+            <label>高さ (px):</label>
+            <input type="number" bind:value={heightOnly} min="64" max="4320" step="2" />
+            <p style="color: #999; font-size: 12px;">幅は元の比率から自動計算されます</p>
+          </div>
+        {/if}
+
+        <div class="row">
+          <label>フレームレート (fps):</label>
+          <input type="number" bind:value={framerate} min="1" max="120" step="1" />
+        </div>
+
+        <div class="row">
+          <label>映像ビットレート (Kbps):</label>
+          <input type="number" bind:value={videoBitrate} min="100" max="50000" step="100" />
+        </div>
+
+        <div class="row">
+          <label>音声ビットレート (Kbps):</label>
+          <input type="number" bind:value={audioBitrate} min="32" max="320" step="8" />
+        </div>
+      </div>
+
+      <!-- Optional Settings -->
+      <div class="panel">
+        <h3 class="section-title">任意設定</h3>
+        
+        <div class="row">
+          <label>映像の回転:</label>
+          <select bind:value={rotation}>
+            <option value={0}>0度</option>
+            <option value={90}>90度</option>
+            <option value={180}>180度</option>
+            <option value={270}>270度</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>映像の反転:</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" bind:checked={flipHorizontal} />
+              <span>左右反転</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" bind:checked={flipVertical} />
+              <span>上下反転</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <div class="panel">
       <button on:click={startEncoding} disabled={!file || encoding}>エンコード開始</button>
