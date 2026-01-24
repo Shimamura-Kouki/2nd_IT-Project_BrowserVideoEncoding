@@ -45,7 +45,7 @@
   let framerate = 30;
   
   // Bitrate settings - quality-based
-  let qualityLevel = '中'; // 最高, 高, 中, 低, カスタム
+  let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム
   let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム'
   let customAudioBitrate = 128; // in Kbps, used when qualityLevel is 'カスタム'
 
@@ -196,6 +196,7 @@
         case '高': multiplier = 0.8; break;
         case '中': multiplier = 0.6; break;
         case '低': multiplier = 0.4; break;
+        case '最低': multiplier = 0.25; break;
       }
       result = baseRate * multiplier;
     }
@@ -725,6 +726,7 @@
           <option value="高">高 (元の80%)</option>
           <option value="中">中 (元の60%) - 推奨</option>
           <option value="低">低 (元の40%)</option>
+          <option value="最低">最低 (元の25%)</option>
           <option value="カスタム">カスタム</option>
         </select>
       </div>
