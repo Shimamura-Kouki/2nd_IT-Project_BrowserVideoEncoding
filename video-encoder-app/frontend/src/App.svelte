@@ -189,18 +189,24 @@
       return isVideo ? 5_000_000 : 128_000;
     }
 
-    let multiplier = 1.0;
-    switch (qualityLevel) {
-      case '最高': multiplier = 1.0; break;
-      case '高': multiplier = 0.8; break;
-      case '中': multiplier = 0.6; break;
-      case '低': multiplier = 0.4; break;
-      case '最低': multiplier = 0.25; break;
-      case 'カスタム': 
-        return isVideo ? customVideoBitrate * 1000 : customAudioBitrate * 1000;
+    let result: number;
+    
+    // Determine base bitrate based on quality level
+    if (qualityLevel === 'カスタム') {
+      // Use custom bitrate but still apply codec-specific constraints below
+      result = isVideo ? customVideoBitrate * 1000 : customAudioBitrate * 1000;
+    } else {
+      // Calculate from base rate with quality multiplier
+      let multiplier = 1.0;
+      switch (qualityLevel) {
+        case '最高': multiplier = 1.0; break;
+        case '高': multiplier = 0.8; break;
+        case '中': multiplier = 0.6; break;
+        case '低': multiplier = 0.4; break;
+        case '最低': multiplier = 0.25; break;
+      }
+      result = baseRate * multiplier;
     }
-
-    let result = baseRate * multiplier;
 
     // Adjust for codec efficiency (video only)
     if (isVideo) {
