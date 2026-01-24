@@ -7,6 +7,7 @@
   let presets: any[] = [];
   let selectedPresetIndex = 0;
   let usePreset = true;
+  let showDetailedSettings = false; // NEW: Track if detailed settings are visible
   let progressPct = 0;
   let fps = 0;
   let elapsedMs = 0;
@@ -20,7 +21,7 @@
   let audioCodec = 'mp4a.40.2';
   
   // Resolution settings
-  let resolutionMode = 'preset'; // 'preset', 'manual', 'width-only', 'height-only'
+  let resolutionMode = 'preset'; // 'preset', 'manual', 'width-only', 'height-only', 'original'
   let resolutionPreset = '1080p';
   let manualWidth = 1920;
   let manualHeight = 1080;
@@ -63,9 +64,15 @@
       audioBitrate = (preset.audio_bitrate ?? 128_000) / 1000;
       framerate = preset.framerate ?? 30;
       
-      if (preset.width && preset.height) {
+      // Handle "元ファイルを維持" presets
+      if (preset.preserveOriginal) {
+        resolutionMode = 'original';
+        framerateMode = 'original';
+      } else if (preset.width && preset.height) {
+        resolutionMode = 'preset';
         manualWidth = preset.width;
         manualHeight = preset.height;
+        framerateMode = 'manual';
         
         // Find matching preset resolution
         const matchingPreset = Object.entries(resolutionPresets).find(
@@ -77,6 +84,14 @@
       }
     }
   }
+  
+  function toggleDetailedSettings() {
+    showDetailedSettings = !showDetailedSettings;
+    if (!showDetailedSettings) {
+      // Reset to preset values when closing
+      applyPreset();
+    }
+  }
 
   async function startEncoding() {
     if (!file) return;
@@ -86,7 +101,11 @@
     let width: number | undefined;
     let height: number | undefined;
 
-    if (resolutionMode === 'preset') {
+    if (resolutionMode === 'original') {
+      // Keep original resolution - don't specify width/height
+      width = undefined;
+      height = undefined;
+    } else if (resolutionMode === 'preset') {
       const res = resolutionPresets[resolutionPreset];
       width = res.width;
       height = res.height;
@@ -338,29 +357,59 @@
   {#if presets.length > 0}
     <div class="panel preset-toggle">
       <div class="row">
-        <label>設定モード:</label>
-        <select bind:value={usePreset} on:change={() => usePreset && applyPreset()}>
-          <option value={true}>プリセット使用</option>
-          <option value={false}>詳細設定</option>
+        <label>プリセット:</label>
+        <select bind:value={selectedPresetIndex} on:change={applyPreset}>
+          {#each presets as p, i}
+            <option value={i}>{p.name}</option>
+          {/each}
         </select>
       </div>
       
-      {#if usePreset}
-        <div class="row">
-          <label>プリセット:</label>
-          <select bind:value={selectedPresetIndex} on:change={applyPreset}>
-            {#each presets as p, i}
-              <option value={i}>{p.name}</option>
-            {/each}
+      <div class="row">
+        <label>コーデック:</label>
+        <div style="display: flex; gap: 8px; flex: 1;">
+          <select bind:value={videoCodec} style="flex: 1;">
+            <optgroup label="H.264 (AVC)">
+              <option value="avc1.640028">H.264 High</option>
+              <option value="avc1.4d001f">H.264 Main</option>
+              <option value="avc1.42001f">H.264 Baseline</option>
+            </optgroup>
+            <optgroup label="H.265 (HEVC)">
+              <option value="hev1.1.6.L93.B0">H.265 Main</option>
+              <option value="hvc1.1.6.L93.B0">H.265 Main (hvc1)</option>
+            </optgroup>
+            <optgroup label="VP9">
+              <option value="vp09.00.31.08">VP9 Profile 0</option>
+              <option value="vp09.00.41.08">VP9 Profile 0 L4.1</option>
+            </optgroup>
+            <optgroup label="AV1">
+              <option value="av01.0.05M.08">AV1 Main L3.1</option>
+              <option value="av01.0.04M.08">AV1 Main L3.0</option>
+            </optgroup>
+          </select>
+          <select bind:value={audioCodec} style="flex: 1;">
+            <option value="mp4a.40.2">AAC-LC</option>
+            <option value="mp4a.40.5">AAC-HE</option>
+            <option value="opus">Opus</option>
           </select>
         </div>
-      {/if}
+      </div>
+      
+      <div class="row">
+        <button 
+          type="button" 
+          on:click={toggleDetailedSettings} 
+          style="width: 100%; padding: 10px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;"
+        >
+          {showDetailedSettings ? '詳細設定を閉じる（設定をリセット）' : '詳細設定を開く'}
+        </button>
+      </div>
     </div>
 
-    {#if !usePreset}
+    {#if showDetailedSettings}
       <!-- Required Settings -->
       <div class="panel">
-        <h3 class="section-title">必須設定</h3>
+        <h3 class="section-title">詳細設定</h3>
         
         <div class="row">
           <label>コンテナ形式:</label>
@@ -372,45 +421,9 @@
         </div>
 
         <div class="row">
-          <label>動画コーデック:</label>
-          <select bind:value={videoCodec}>
-            <optgroup label="H.264 (AVC)">
-              <option value="avc1.640028">H.264 High Profile</option>
-              <option value="avc1.4d001f">H.264 Main Profile</option>
-              <option value="avc1.42001f">H.264 Baseline Profile</option>
-              <option value="avc1.42001e">H.264 Baseline Level 3.0</option>
-            </optgroup>
-            <optgroup label="H.265 (HEVC)">
-              <option value="hev1.1.6.L93.B0">H.265 Main Profile</option>
-              <option value="hvc1.1.6.L93.B0">H.265 Main (hvc1)</option>
-            </optgroup>
-            <optgroup label="VP9">
-              <option value="vp09.00.31.08">VP9 Profile 0</option>
-              <option value="vp09.00.41.08">VP9 Profile 0 Level 4.1</option>
-            </optgroup>
-            <optgroup label="AV1">
-              <option value="av01.0.05M.08">AV1 Main Profile Level 3.1</option>
-              <option value="av01.0.04M.08">AV1 Main Profile Level 3.0</option>
-            </optgroup>
-          </select>
-        </div>
-
-        <div class="row">
-          <label>音声コーデック:</label>
-          <select bind:value={audioCodec}>
-            <optgroup label="AAC">
-              <option value="mp4a.40.2">AAC-LC</option>
-              <option value="mp4a.40.5">AAC-HE</option>
-            </optgroup>
-            <optgroup label="Opus (WebM)">
-              <option value="opus">Opus</option>
-            </optgroup>
-          </select>
-        </div>
-
-        <div class="row">
           <label>解像度モード:</label>
           <select bind:value={resolutionMode}>
+            <option value="original">元の解像度を保持</option>
             <option value="preset">プリセット</option>
             <option value="manual">手動指定(幅×高さ)</option>
             <option value="width-only">幅のみ指定</option>
