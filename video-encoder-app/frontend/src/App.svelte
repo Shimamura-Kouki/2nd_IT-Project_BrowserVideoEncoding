@@ -242,14 +242,31 @@
       // Apply audio codec multipliers if needed
       // (none currently, but this is where they would go)
       
+      // Determine which codec SHOULD be used based on quality level (for MP4)
+      // This ensures we apply correct constraints even before reactive switching completes
+      let effectiveAudioCodec = audioCodec;
+      if (containerFormat === 'mp4') {
+        if (qualityLevel === '低' || qualityLevel === '最低') {
+          // Low quality should use AAC-HE
+          if (audioCodec.startsWith('mp4a.40.2') || audioCodec.startsWith('mp4a.40.5')) {
+            effectiveAudioCodec = 'mp4a.40.5'; // Force AAC-HE for calculation
+          }
+        } else if (qualityLevel === '中' || qualityLevel === '高' || qualityLevel === '最高') {
+          // Medium+ quality should use AAC-LC
+          if (audioCodec.startsWith('mp4a.40.2') || audioCodec.startsWith('mp4a.40.5')) {
+            effectiveAudioCodec = 'mp4a.40.2'; // Force AAC-LC for calculation
+          }
+        }
+      }
+      
       // Enforce codec-specific bitrate constraints and caps
-      if (audioCodec === 'opus') {
+      if (effectiveAudioCodec === 'opus') {
         // Opus: minimum 32 Kbps, maximum 256 Kbps
         const OPUS_MIN = 32_000;
         const OPUS_MAX = 256_000;
         if (result < OPUS_MIN) result = OPUS_MIN;
         if (result > OPUS_MAX) result = OPUS_MAX;
-      } else if (audioCodec.startsWith('mp4a.40.2')) {
+      } else if (effectiveAudioCodec.startsWith('mp4a.40.2')) {
         // AAC-LC: Must be one of [96, 128, 160, 192] Kbps
         const AAC_LC_MIN = 96_000;
         const AAC_LC_MAX = 192_000;
@@ -259,7 +276,7 @@
         
         // Round to nearest valid value using shared utility
         result = roundToValidAACLCBitrate(result);
-      } else if (audioCodec.startsWith('mp4a.40.5')) {
+      } else if (effectiveAudioCodec.startsWith('mp4a.40.5')) {
         // AAC-HE: minimum 32 Kbps, maximum 128 Kbps
         const AAC_HE_MIN = 32_000;
         const AAC_HE_MAX = 128_000;
