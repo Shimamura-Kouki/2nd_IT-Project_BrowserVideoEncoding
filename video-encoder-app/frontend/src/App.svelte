@@ -89,6 +89,11 @@
     }
   }
 
+  // Auto-expand error log when errors occur during encoding
+  $: if (errorLogs.length > 0 && encoding) {
+    showErrorLogs = true;
+  }
+
   // Reactive computed bitrates for display
   let estimatedVideoBitrate = 0;
   let estimatedAudioBitrate = 0;
@@ -341,18 +346,9 @@
     errorLogs = []; // Clear error logs when starting new encoding
     encoding = true;
     
-    // Auto-switch audio codec based on quality level
-    if (qualityLevel === '低' || qualityLevel === '最低') {
-      // Low quality: use AAC-HE
-      if (audioCodec.startsWith('mp4a.40.2')) {
-        audioCodec = 'mp4a.40.5'; // Switch to AAC-HE
-      }
-    } else if (qualityLevel === '中' || qualityLevel === '高' || qualityLevel === '最高') {
-      // Medium or higher quality: use AAC-LC
-      if (audioCodec.startsWith('mp4a.40.5')) {
-        audioCodec = 'mp4a.40.2'; // Switch to AAC-LC
-      }
-    }
+    // Note: Audio codec switching is handled by reactive block (lines 67-90)
+    // No need to manually switch here - the reactive block ensures the codec
+    // is already correct based on quality level before encoding starts
 
     let width: number | undefined;
     let height: number | undefined;
