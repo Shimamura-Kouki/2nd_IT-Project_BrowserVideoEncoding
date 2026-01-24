@@ -54,13 +54,57 @@
   let flipHorizontal = false;
   let flipVertical = false;
 
-  // Auto-change container based on codec selection
+  // Auto-change container based on video codec selection only (to avoid cycles)
   $: {
-    if (videoCodec.startsWith('vp09') || videoCodec.startsWith('vp08') || videoCodec.startsWith('av01') || audioCodec === 'opus') {
+    if (videoCodec.startsWith('vp09') || videoCodec.startsWith('vp08') || videoCodec.startsWith('av01')) {
       containerFormat = 'webm';
     } else if (videoCodec.startsWith('avc1') || videoCodec.startsWith('hev1') || videoCodec.startsWith('hvc1')) {
       containerFormat = 'mp4';
     }
+  }
+
+  // Auto-switch audio codec based on quality level and container (for MP4)
+  $: {
+    // Only auto-switch for MP4 containers to avoid opus conflicts
+    if (containerFormat === 'mp4' && !audioCodec.startsWith('mp4a')) {
+      // If somehow we have opus in MP4, switch to AAC-LC
+      audioCodec = 'mp4a.40.2';
+    }
+    
+    if (containerFormat === 'mp4') {
+      if (qualityLevel === '低' || qualityLevel === '最低') {
+        // Low quality: use AAC-HE (min 32 Kbps)
+        if (audioCodec.startsWith('mp4a.40.2')) {
+          audioCodec = 'mp4a.40.5';
+        }
+      } else if (qualityLevel === '中' || qualityLevel === '高' || qualityLevel === '最高') {
+        // Medium or higher quality: use AAC-LC (min 96 Kbps)
+        if (audioCodec.startsWith('mp4a.40.5')) {
+          audioCodec = 'mp4a.40.2';
+        }
+      }
+    } else if (containerFormat === 'webm' && audioCodec.startsWith('mp4a')) {
+      // If we switched to WebM but still have AAC, switch to Opus
+      audioCodec = 'opus';
+    }
+  }
+
+  // Reactive computed bitrates for display
+  let estimatedVideoBitrate = 0;
+  let estimatedAudioBitrate = 0;
+
+  // Recalculate bitrates when relevant settings change
+  $: {
+    // Trigger recalculation when any of these change
+    const deps = [
+      qualityLevel, customVideoBitrate, customAudioBitrate,
+      videoCodec, audioCodec,
+      resolutionMode, resolutionPreset, manualWidth, manualHeight, widthOnly, heightOnly,
+      originalVideoBitrate, originalAudioBitrate, originalWidth, originalHeight,
+      sourceFileAnalyzed
+    ];
+    estimatedVideoBitrate = calculateBitrate(true);
+    estimatedAudioBitrate = calculateBitrate(false);
   }
 
   const resolutionPresets = {
@@ -682,7 +726,7 @@
 
       {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
         <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
-          推定ビットレート: 映像 {(calculateBitrate(true) / 1000000).toFixed(1)}Mbps / 音声 {(calculateBitrate(false) / 1000).toFixed(0)}Kbps
+          推定ビットレート: 映像 {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps / 音声 {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
           {#if videoCodec.startsWith('vp09')}
             (VP9コーデックにより最適化)
           {:else if videoCodec.startsWith('av01')}
