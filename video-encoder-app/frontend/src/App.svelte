@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
-  import { roundToValidAACLCBitrate } from './lib/utils/audioUtils.js';
+  import { roundToValidAACBitrate } from './lib/utils/audioUtils.js';
   import MP4Box from 'mp4box';
 
   let file: File | null = null;
@@ -63,7 +63,7 @@
     }
   }
 
-  // Auto-switch audio codec based on quality level and container (for MP4)
+  // Auto-switch audio codec based on container format
   $: {
     // Only auto-switch for MP4 containers to avoid opus conflicts
     if (containerFormat === 'mp4' && !audioCodec.startsWith('mp4a')) {
@@ -71,17 +71,10 @@
       audioCodec = 'mp4a.40.2';
     }
     
+    // Always use AAC-LC for MP4 containers
     if (containerFormat === 'mp4') {
-      if (qualityLevel === '低' || qualityLevel === '最低') {
-        // Low quality: use AAC-HE (min 32 Kbps)
-        if (audioCodec.startsWith('mp4a.40.2')) {
-          audioCodec = 'mp4a.40.5';
-        }
-      } else if (qualityLevel === '中' || qualityLevel === '高' || qualityLevel === '最高') {
-        // Medium or higher quality: use AAC-LC (min 96 Kbps)
-        if (audioCodec.startsWith('mp4a.40.5')) {
-          audioCodec = 'mp4a.40.2';
-        }
+      if (audioCodec.startsWith('mp4a.40.5')) {
+        audioCodec = 'mp4a.40.2';
       }
     } else if (containerFormat === 'webm' && audioCodec.startsWith('mp4a')) {
       // If we switched to WebM but still have AAC, switch to Opus
@@ -253,20 +246,12 @@
       // Apply audio codec multipliers if needed
       // (none currently, but this is where they would go)
       
-      // Determine which codec SHOULD be used based on quality level (for MP4)
-      // This ensures we apply correct constraints even before reactive switching completes
+      // Determine which codec SHOULD be used based on container format
+      // For MP4 containers, always use AAC-LC
       let effectiveAudioCodec = audioCodec;
       if (containerFormat === 'mp4') {
-        if (qualityLevel === '低' || qualityLevel === '最低') {
-          // Low quality should use AAC-HE
-          if (audioCodec.startsWith('mp4a.40.2') || audioCodec.startsWith('mp4a.40.5')) {
-            effectiveAudioCodec = 'mp4a.40.5'; // Force AAC-HE for calculation
-          }
-        } else if (qualityLevel === '中' || qualityLevel === '高' || qualityLevel === '最高') {
-          // Medium+ quality should use AAC-LC
-          if (audioCodec.startsWith('mp4a.40.2') || audioCodec.startsWith('mp4a.40.5')) {
-            effectiveAudioCodec = 'mp4a.40.2'; // Force AAC-LC for calculation
-          }
+        if (audioCodec.startsWith('mp4a.40.2') || audioCodec.startsWith('mp4a.40.5')) {
+          effectiveAudioCodec = 'mp4a.40.2'; // Always use AAC-LC for MP4
         }
       }
       
@@ -286,13 +271,16 @@
         if (result > AAC_LC_MAX) result = AAC_LC_MAX;
         
         // Round to nearest valid value using shared utility
-        result = roundToValidAACLCBitrate(result);
+        result = roundToValidAACBitrate(result);
       } else if (effectiveAudioCodec.startsWith('mp4a.40.5')) {
-        // AAC-HE: minimum 32 Kbps, maximum 128 Kbps
-        const AAC_HE_MIN = 32_000;
-        const AAC_HE_MAX = 128_000;
+        // AAC-HE: Must be one of [96, 128, 160, 192] Kbps (same as AAC-LC)
+        const AAC_HE_MIN = 96_000;
+        const AAC_HE_MAX = 192_000;
         if (result < AAC_HE_MIN) result = AAC_HE_MIN;
         if (result > AAC_HE_MAX) result = AAC_HE_MAX;
+        
+        // Round to nearest valid value using shared utility
+        result = roundToValidAACBitrate(result);
       }
     }
 
