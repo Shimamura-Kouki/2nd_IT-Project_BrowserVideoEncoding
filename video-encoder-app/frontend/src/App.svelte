@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
+  import MP4Box from 'mp4box';
 
   let file: File | null = null;
   let presets: any[] = [];
@@ -50,6 +51,15 @@
   let flipHorizontal = false;
   let flipVertical = false;
 
+  // Auto-change container based on codec selection
+  $: {
+    if (videoCodec.startsWith('vp09') || videoCodec.startsWith('vp08') || videoCodec.startsWith('av01') || audioCodec === 'opus') {
+      containerFormat = 'webm';
+    } else if (videoCodec.startsWith('avc1') || videoCodec.startsWith('hev1') || videoCodec.startsWith('hvc1')) {
+      containerFormat = 'mp4';
+    }
+  }
+
   const resolutionPresets = {
     '2160p': { width: 3840, height: 2160 },
     '1440p': { width: 2560, height: 1440 },
@@ -59,7 +69,7 @@
     '360p': { width: 640, height: 360 }
   };
 
-  const pickFile = (e: Event) => {
+  const pickFile = async (e: Event) => {
     const input = e.target as HTMLInputElement;
     file = input.files?.[0] ?? null;
     sourceFileAnalyzed = false; // Reset analysis state when new file is picked
@@ -68,6 +78,55 @@
     originalFramerate = 0;
     originalVideoBitrate = 0;
     originalAudioBitrate = 0;
+    
+    // Analyze file immediately when selected
+    if (file) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const mp4boxfile = MP4Box.createFile();
+        
+        mp4boxfile.onReady = (info: any) => {
+          const videoTrack = info.videoTracks?.[0];
+          if (videoTrack) {
+            originalWidth = videoTrack.video.width;
+            originalHeight = videoTrack.video.height;
+            originalFramerate = videoTrack.movie_duration && videoTrack.nb_samples 
+              ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
+              : 30;
+            
+            // Calculate video bitrate
+            if (videoTrack.bitrate) {
+              originalVideoBitrate = videoTrack.bitrate;
+            } else if (videoTrack.movie_duration && info.size) {
+              const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
+              originalVideoBitrate = Math.round((info.size * 8) / durationSec);
+            }
+          }
+          
+          const audioTrack = info.audioTracks?.[0];
+          if (audioTrack) {
+            // Calculate audio bitrate
+            if (audioTrack.bitrate) {
+              originalAudioBitrate = audioTrack.bitrate;
+            } else {
+              originalAudioBitrate = 128000; // default estimate
+            }
+          }
+          
+          sourceFileAnalyzed = true;
+        };
+        
+        mp4boxfile.onError = (e: any) => {
+          console.error('MP4Box analysis error:', e);
+        };
+        
+        arrayBuffer.fileStart = 0;
+        mp4boxfile.appendBuffer(arrayBuffer);
+        mp4boxfile.flush();
+      } catch (error) {
+        console.error('Failed to analyze file:', error);
+      }
+    }
   };
 
   // Calculate bitrate based on quality level and codec
@@ -475,33 +534,61 @@
       
       <div class="row">
         <label>コーデック:</label>
-        <div style="display: flex; gap: 8px; flex: 1;">
-          <select bind:value={videoCodec} style="flex: 1;">
-            <optgroup label="H.264 (AVC)">
-              <option value="avc1.640028">H.264 High</option>
-              <option value="avc1.4d001f">H.264 Main</option>
-              <option value="avc1.42001f">H.264 Baseline</option>
-            </optgroup>
-            <optgroup label="H.265 (HEVC)">
-              <option value="hev1.1.6.L93.B0">H.265 Main</option>
-              <option value="hvc1.1.6.L93.B0">H.265 Main (hvc1)</option>
-            </optgroup>
-            <optgroup label="VP9">
-              <option value="vp09.00.31.08">VP9 Profile 0</option>
-              <option value="vp09.00.41.08">VP9 Profile 0 L4.1</option>
-            </optgroup>
-            <optgroup label="AV1">
-              <option value="av01.0.05M.08">AV1 Main L3.1</option>
-              <option value="av01.0.04M.08">AV1 Main L3.0</option>
-            </optgroup>
-          </select>
-          <select bind:value={audioCodec} style="flex: 1;">
-            <option value="mp4a.40.2">AAC-LC</option>
-            <option value="mp4a.40.5">AAC-HE</option>
-            <option value="opus">Opus</option>
-          </select>
-        </div>
+        <select bind:value={videoCodec} style="flex: 1;">
+          <optgroup label="H.264 (AVC)">
+            <option value="avc1.640028">H.264 High</option>
+            <option value="avc1.4d001f">H.264 Main</option>
+            <option value="avc1.42001f">H.264 Baseline</option>
+          </optgroup>
+          <optgroup label="H.265 (HEVC)">
+            <option value="hev1.1.6.L93.B0">H.265 Main</option>
+            <option value="hvc1.1.6.L93.B0">H.265 Main (hvc1)</option>
+          </optgroup>
+          <optgroup label="VP9">
+            <option value="vp09.00.31.08">VP9 Profile 0</option>
+            <option value="vp09.00.41.08">VP9 Profile 0 L4.1</option>
+          </optgroup>
+          <optgroup label="AV1">
+            <option value="av01.0.05M.08">AV1 Main L3.1</option>
+            <option value="av01.0.04M.08">AV1 Main L3.0</option>
+          </optgroup>
+        </select>
       </div>
+      
+      <div class="row">
+        <label>ビットレート品質:</label>
+        <select bind:value={qualityLevel}>
+          <option value="最高">最高 (元ファイルと同等)</option>
+          <option value="高">高 (元の80%)</option>
+          <option value="中">中 (元の60%) - 推奨</option>
+          <option value="低">低 (元の40%)</option>
+          <option value="最低">最低 (元の25%)</option>
+          <option value="カスタム">カスタム</option>
+        </select>
+      </div>
+
+      {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
+        <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
+          推定ビットレート: 映像 {(calculateBitrate(true) / 1000000).toFixed(1)}Mbps / 音声 {(calculateBitrate(false) / 1000).toFixed(0)}Kbps
+          {#if videoCodec.startsWith('vp09')}
+            (VP9コーデックにより最適化)
+          {:else if videoCodec.startsWith('av01')}
+            (AV1コーデックにより最適化)
+          {/if}
+        </p>
+      {/if}
+
+      {#if qualityLevel === 'カスタム'}
+        <div class="row">
+          <label>映像ビットレート (Kbps):</label>
+          <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
+        </div>
+
+        <div class="row">
+          <label>音声ビットレート (Kbps):</label>
+          <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
+        </div>
+      {/if}
       
       <div class="row">
         <button 
@@ -518,6 +605,15 @@
       <!-- Required Settings -->
       <div class="panel">
         <h3 class="section-title">詳細設定</h3>
+        
+        <div class="row">
+          <label>音声コーデック:</label>
+          <select bind:value={audioCodec}>
+            <option value="mp4a.40.2">AAC-LC</option>
+            <option value="mp4a.40.5">AAC-HE</option>
+            <option value="opus">Opus</option>
+          </select>
+        </div>
         
         <div class="row">
           <label>コンテナ形式:</label>
@@ -609,41 +705,6 @@
           {#if sourceFileAnalyzed && originalFramerate > 0 && framerate > originalFramerate}
             <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ フレームレートを元ファイル({originalFramerate.toFixed(1)}fps)より高く設定しても品質は向上しません</p>
           {/if}
-        {/if}
-
-        <div class="row">
-          <label>ビットレート品質:</label>
-          <select bind:value={qualityLevel}>
-            <option value="最高">最高 (元ファイルと同等)</option>
-            <option value="高">高 (元の80%)</option>
-            <option value="中">中 (元の60%) - 推奨</option>
-            <option value="低">低 (元の40%)</option>
-            <option value="最低">最低 (元の25%)</option>
-            <option value="カスタム">カスタム</option>
-          </select>
-        </div>
-
-        {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
-          <p style="color: #666; font-size: 12px; margin-top: -8px;">
-            推定ビットレート: 映像 {(calculateBitrate(true) / 1000000).toFixed(1)}Mbps / 音声 {(calculateBitrate(false) / 1000).toFixed(0)}Kbps
-            {#if videoCodec.startsWith('vp09')}
-              (VP9コーデックにより最適化)
-            {:else if videoCodec.startsWith('av01')}
-              (AV1コーデックにより最適化)
-            {/if}
-          </p>
-        {/if}
-
-        {#if qualityLevel === 'カスタム'}
-          <div class="row">
-            <label>映像ビットレート (Kbps):</label>
-            <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
-          </div>
-
-          <div class="row">
-            <label>音声ビットレート (Kbps):</label>
-            <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
-          </div>
         {/if}
       </div>
 
