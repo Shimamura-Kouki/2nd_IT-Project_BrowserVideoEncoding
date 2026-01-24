@@ -4,7 +4,6 @@ on:
   push:
     branches: 
       - feature/static-github-pages
-      - copilot/update-video-resizing-options
   workflow_dispatch:
 
 permissions:
