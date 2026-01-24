@@ -1,7 +1,7 @@
 import { Muxer as MP4Muxer, FileSystemWritableFileStreamTarget as MP4Target } from 'mp4-muxer';
 import { Muxer as WebMMuxer, FileSystemWritableFileStreamTarget as WebMTarget } from 'webm-muxer';
 import { demuxAndDecode } from './demuxer.js';
-import { validateAudioBitrate } from '../utils/audioUtils.js';
+import { validateAudioBitrate, isAACCodec } from '../utils/audioUtils.js';
 
 // Progress contribution: demuxing contributes 10% of total progress, encoding 90%
 const DEMUX_PROGRESS_PERCENTAGE = 10;
@@ -257,7 +257,7 @@ export async function encodeToFile(file, config, onProgress) {
             // This ensures compatibility with decoded audio data
             // Apply AAC bitrate rounding to valid values if needed
             let audioBitrate = config.audio.bitrate;
-            if (config.audio.codec.startsWith('mp4a.40.2') || config.audio.codec.startsWith('mp4a.40.5')) {
+            if (isAACCodec(config.audio.codec)) {
                 // AAC-LC and AAC-HE: Round to nearest valid value using shared utility
                 audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
             }
