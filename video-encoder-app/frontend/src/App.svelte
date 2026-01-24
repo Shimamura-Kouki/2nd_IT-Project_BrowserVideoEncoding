@@ -104,6 +104,7 @@
     const config = {
       video: { 
         codec: videoCodec, 
+        container: containerFormat,
         width: width, 
         height: height, 
         bitrate: videoBitrate * 1000, 

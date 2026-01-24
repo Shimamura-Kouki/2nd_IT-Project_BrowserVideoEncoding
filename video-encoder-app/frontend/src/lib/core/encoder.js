@@ -1,4 +1,5 @@
-import { Muxer, FileSystemWritableFileStreamTarget } from 'mp4-muxer';
+import { Muxer as MP4Muxer, FileSystemWritableFileStreamTarget as MP4Target } from 'mp4-muxer';
+import { Muxer as WebMMuxer, FileSystemWritableFileStreamTarget as WebMTarget } from 'webm-muxer';
 import { demuxAndDecode } from './demuxer.js';
 
 // Progress contribution: demuxing contributes 10% of total progress, encoding 90%
@@ -8,14 +9,22 @@ const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
 /**
  * ブラウザ内でエンコードし、FileSystem APIへストリーム保存
  * @param {File} file
- * @param {{ video: { width:number, height:number, bitrate:number, framerate:number, codec:string }, audio?: { sampleRate:number, numberOfChannels:number, bitrate:number, codec:string } }} config
+ * @param {{ video: { width:number, height:number, bitrate:number, framerate:number, framerateMode?:string, codec:string, container?:string }, audio?: { sampleRate:number, numberOfChannels:number, bitrate:number, codec:string } }} config
  * @param {(pct:number, stats?:{fps:number, elapsedMs:number, etaMs?:number})=>void} onProgress
  * @returns {Promise<void>}
  */
 export async function encodeToFile(file, config, onProgress) {
+    // Determine container format from config or codec
+    const container = config.video.container || (
+        config.video.codec.startsWith('vp') || config.video.codec.startsWith('av01') ? 'webm' : 'mp4'
+    );
+    
+    const fileExtension = container === 'webm' ? '.webm' : (container === 'mov' ? '.mov' : '.mp4');
+    const mimeType = container === 'webm' ? 'video/webm' : 'video/mp4';
+    
     const handle = await window.showSaveFilePicker({
-        suggestedName: 'output.mp4',
-        types: [{ description: 'Video File', accept: { 'video/mp4': ['.mp4'] } }]
+        suggestedName: `output${fileExtension}`,
+        types: [{ description: 'Video File', accept: { [mimeType]: [fileExtension] } }]
     });
     const fileStream = await handle.createWritable();
 
@@ -129,25 +138,75 @@ export async function encodeToFile(file, config, onProgress) {
             outputHeight = Math.round(outputHeight / 2) * 2;
         }
         
-        // Create muxer with appropriate configuration
-        const muxerConfig = {
-            target: new FileSystemWritableFileStreamTarget(fileStream),
-            video: { codec: 'avc', width: outputWidth, height: outputHeight },
-            fastStart: false,
-            firstTimestampBehavior: 'offset'
+        // Determine container format from config
+        const container = config.video.container || (
+            config.video.codec.startsWith('vp') || config.video.codec.startsWith('av01') ? 'webm' : 'mp4'
+        );
+        
+        // Map WebCodecs codec strings to muxer codec identifiers
+        const getMuxerCodec = (codecString, type) => {
+            if (type === 'video') {
+                if (codecString.startsWith('avc') || codecString.startsWith('h264')) return 'avc';
+                if (codecString.startsWith('hev') || codecString.startsWith('hvc') || codecString.startsWith('h265')) return 'hevc';
+                if (codecString.startsWith('vp09') || codecString.startsWith('vp9')) return 'V_VP9';
+                if (codecString.startsWith('vp08') || codecString.startsWith('vp8')) return 'V_VP8';
+                if (codecString.startsWith('av01')) return 'V_AV1';
+                return 'avc'; // default fallback
+            } else { // audio
+                if (codecString.startsWith('mp4a') || codecString.toLowerCase().includes('aac')) return 'aac';
+                if (codecString.toLowerCase() === 'opus') return 'A_OPUS';
+                return 'aac'; // default fallback
+            }
         };
-
-        // Only add audio track if source has audio AND config includes audio
-        // Use detected audio format from source file, not preset
-        if (hasAudio && config.audio && audioFormat) {
-            muxerConfig.audio = {
-                codec: 'aac',
-                sampleRate: audioFormat.sampleRate,
-                numberOfChannels: audioFormat.numberOfChannels
+        
+        const videoMuxerCodec = getMuxerCodec(config.video.codec, 'video');
+        const audioMuxerCodec = config.audio ? getMuxerCodec(config.audio.codec, 'audio') : null;
+        
+        // Create muxer with appropriate configuration based on container
+        if (container === 'webm') {
+            // WebM muxer configuration
+            const muxerConfig = {
+                target: new WebMTarget(fileStream),
+                video: { 
+                    codec: videoMuxerCodec,
+                    width: outputWidth, 
+                    height: outputHeight 
+                },
+                firstTimestampBehavior: 'offset'
             };
-        }
+            
+            if (hasAudio && config.audio && audioFormat) {
+                muxerConfig.audio = {
+                    codec: audioMuxerCodec,
+                    sampleRate: audioFormat.sampleRate,
+                    numberOfChannels: audioFormat.numberOfChannels
+                };
+            }
+            
+            muxer = new WebMMuxer(muxerConfig);
+        } else {
+            // MP4 muxer configuration
+            const muxerConfig = {
+                target: new MP4Target(fileStream),
+                video: { 
+                    codec: videoMuxerCodec,
+                    width: outputWidth, 
+                    height: outputHeight 
+                },
+                fastStart: false,
+                firstTimestampBehavior: 'offset'
+            };
 
-        muxer = new Muxer(muxerConfig);
+            if (hasAudio && config.audio && audioFormat) {
+                muxerConfig.audio = {
+                    codec: audioMuxerCodec,
+                    sampleRate: audioFormat.sampleRate,
+                    numberOfChannels: audioFormat.numberOfChannels
+                };
+            }
+
+            muxer = new MP4Muxer(muxerConfig);
+        }
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
