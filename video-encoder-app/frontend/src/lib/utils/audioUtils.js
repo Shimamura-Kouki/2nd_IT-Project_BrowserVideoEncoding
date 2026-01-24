@@ -31,7 +31,7 @@ export function roundToValidAACBitrate(bitrate) {
  * Rounds bitrate to the nearest valid AAC-LC value
  * @param {number} bitrate - Input bitrate in bps
  * @returns {number} - Nearest valid AAC-LC bitrate
- * @deprecated Since v0.1.0 - Use roundToValidAACBitrate instead. This function will be removed in a future version.
+ * @deprecated Since v0.1.0 - Use roundToValidAACBitrate instead. Will be removed in v1.0.0.
  */
 export function roundToValidAACLCBitrate(bitrate) {
     return roundToValidAACBitrate(bitrate);
