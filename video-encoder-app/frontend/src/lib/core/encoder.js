@@ -1,5 +1,7 @@
-import { Muxer, FileSystemWritableFileStreamTarget } from 'mp4-muxer';
+import { Muxer as MP4Muxer, FileSystemWritableFileStreamTarget as MP4Target } from 'mp4-muxer';
+import { Muxer as WebMMuxer, FileSystemWritableFileStreamTarget as WebMTarget } from 'webm-muxer';
 import { demuxAndDecode } from './demuxer.js';
+import { roundToValidAACLCBitrate } from '../utils/audioUtils.js';
 
 // Progress contribution: demuxing contributes 10% of total progress, encoding 90%
 const DEMUX_PROGRESS_PERCENTAGE = 10;
@@ -8,14 +10,22 @@ const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
 /**
  * ブラウザ内でエンコードし、FileSystem APIへストリーム保存
  * @param {File} file
- * @param {{ video: { width:number, height:number, bitrate:number, framerate:number, codec:string }, audio?: { sampleRate:number, numberOfChannels:number, bitrate:number, codec:string } }} config
+ * @param {{ video: { width:number, height:number, bitrate:number, framerate:number, framerateMode?:string, codec:string, container?:string }, audio?: { sampleRate:number, numberOfChannels:number, bitrate:number, codec:string } }} config
  * @param {(pct:number, stats?:{fps:number, elapsedMs:number, etaMs?:number})=>void} onProgress
  * @returns {Promise<void>}
  */
 export async function encodeToFile(file, config, onProgress) {
+    // Determine container format from config or codec
+    const container = config.video.container || (
+        config.video.codec.startsWith('vp') || config.video.codec.startsWith('av01') ? 'webm' : 'mp4'
+    );
+    
+    const fileExtension = container === 'webm' ? '.webm' : (container === 'mov' ? '.mov' : '.mp4');
+    const mimeType = container === 'webm' ? 'video/webm' : 'video/mp4';
+    
     const handle = await window.showSaveFilePicker({
-        suggestedName: 'output.mp4',
-        types: [{ description: 'Video File', accept: { 'video/mp4': ['.mp4'] } }]
+        suggestedName: `output${fileExtension}`,
+        types: [{ description: 'Video File', accept: { [mimeType]: [fileExtension] } }]
     });
     const fileStream = await handle.createWritable();
 
@@ -67,28 +77,145 @@ export async function encodeToFile(file, config, onProgress) {
 
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
-        const { hasAudio, audioFormat, totalFrames: frames } = detectedFormat;
+        const { hasAudio, audioFormat, videoFormat, totalFrames: frames } = detectedFormat;
         totalFrames = frames ?? 0; // Store total frames for progress calculation
         
-        // Create muxer with appropriate configuration
-        const muxerConfig = {
-            target: new FileSystemWritableFileStreamTarget(fileStream),
-            video: { codec: 'avc', width: config.video.width, height: config.video.height },
-            fastStart: false,
-            firstTimestampBehavior: 'offset'
-        };
-
-        // Only add audio track if source has audio AND config includes audio
-        // Use detected audio format from source file, not preset
-        if (hasAudio && config.audio && audioFormat) {
-            muxerConfig.audio = {
-                codec: 'aac',
-                sampleRate: audioFormat.sampleRate,
-                numberOfChannels: audioFormat.numberOfChannels
-            };
+        // Pass metadata to the progress callback
+        onProgress(undefined, undefined, detectedFormat);
+        
+        // Check for unsupported features and log warnings
+        if (config.video.rotation && config.video.rotation !== 0) {
+            console.warn('Video rotation is not yet implemented and will be ignored.');
         }
+        if (config.video.flipHorizontal || config.video.flipVertical) {
+            console.warn('Video flipping is not yet implemented and will be ignored.');
+        }
+        
+        // Determine output framerate
+        let outputFramerate = config.video.framerate;
+        if (config.video.framerateMode === 'original' && videoFormat?.framerate) {
+            outputFramerate = videoFormat.framerate;
+            console.log(`Using original framerate: ${outputFramerate.toFixed(2)} fps`);
+        }
+        
+        // Calculate actual output dimensions to prevent upscaling
+        let outputWidth = config.video.width;
+        let outputHeight = config.video.height;
+        
+        if (videoFormat) {
+            const originalWidth = videoFormat.width;
+            const originalHeight = videoFormat.height;
+            const originalAspectRatio = originalWidth / originalHeight;
+            
+            // If only width is specified (height is null/undefined), calculate height
+            if (outputWidth && !outputHeight) {
+                outputHeight = Math.round(outputWidth / originalAspectRatio);
+            }
+            // If only height is specified (width is null/undefined), calculate width
+            else if (!outputWidth && outputHeight) {
+                outputWidth = Math.round(outputHeight * originalAspectRatio);
+            }
+            // If both are specified, maintain aspect ratio by fitting to the smaller dimension
+            else if (outputWidth && outputHeight) {
+                const targetAspectRatio = outputWidth / outputHeight;
+                if (Math.abs(targetAspectRatio - originalAspectRatio) > 0.01) {
+                    // Aspect ratios don't match, fit to maintain original ratio
+                    if (targetAspectRatio > originalAspectRatio) {
+                        // Target is wider, constrain by height
+                        outputWidth = Math.round(outputHeight * originalAspectRatio);
+                    } else {
+                        // Target is taller, constrain by width
+                        outputHeight = Math.round(outputWidth / originalAspectRatio);
+                    }
+                }
+            }
+            // If neither width nor height is specified, use original dimensions
+            else if (!outputWidth && !outputHeight) {
+                outputWidth = originalWidth;
+                outputHeight = originalHeight;
+            }
+            
+            // Prevent upscaling: don't exceed original dimensions
+            if (outputWidth > originalWidth || outputHeight > originalHeight) {
+                const scale = Math.min(originalWidth / outputWidth, originalHeight / outputHeight);
+                outputWidth = Math.round(outputWidth * scale);
+                outputHeight = Math.round(outputHeight * scale);
+            }
+            
+            // Ensure dimensions are even numbers (required for many codecs)
+            outputWidth = Math.round(outputWidth / 2) * 2;
+            outputHeight = Math.round(outputHeight / 2) * 2;
+        }
+        
+        // Determine container format from config
+        const container = config.video.container || (
+            config.video.codec.startsWith('vp') || config.video.codec.startsWith('av01') ? 'webm' : 'mp4'
+        );
+        
+        // Map WebCodecs codec strings to muxer codec identifiers
+        const getMuxerCodec = (codecString, type) => {
+            if (type === 'video') {
+                if (codecString.startsWith('avc') || codecString.startsWith('h264')) return 'avc';
+                if (codecString.startsWith('hev') || codecString.startsWith('hvc') || codecString.startsWith('h265')) return 'hevc';
+                if (codecString.startsWith('vp09') || codecString.startsWith('vp9')) return 'V_VP9';
+                if (codecString.startsWith('vp08') || codecString.startsWith('vp8')) return 'V_VP8';
+                if (codecString.startsWith('av01')) return 'V_AV1';
+                return 'avc'; // default fallback
+            } else { // audio
+                if (codecString.startsWith('mp4a') || codecString.toLowerCase().includes('aac')) return 'aac';
+                if (codecString.toLowerCase() === 'opus') return 'A_OPUS';
+                return 'aac'; // default fallback
+            }
+        };
+        
+        const videoMuxerCodec = getMuxerCodec(config.video.codec, 'video');
+        const audioMuxerCodec = config.audio ? getMuxerCodec(config.audio.codec, 'audio') : null;
+        
+        // Create muxer with appropriate configuration based on container
+        if (container === 'webm') {
+            // WebM muxer configuration
+            const muxerConfig = {
+                target: new WebMTarget(fileStream),
+                video: { 
+                    codec: videoMuxerCodec,
+                    width: outputWidth, 
+                    height: outputHeight 
+                },
+                firstTimestampBehavior: 'offset'
+            };
+            
+            if (hasAudio && config.audio && audioFormat) {
+                muxerConfig.audio = {
+                    codec: audioMuxerCodec,
+                    sampleRate: audioFormat.sampleRate,
+                    numberOfChannels: audioFormat.numberOfChannels
+                };
+            }
+            
+            muxer = new WebMMuxer(muxerConfig);
+        } else {
+            // MP4 muxer configuration
+            const muxerConfig = {
+                target: new MP4Target(fileStream),
+                video: { 
+                    codec: videoMuxerCodec,
+                    width: outputWidth, 
+                    height: outputHeight 
+                },
+                fastStart: false,
+                firstTimestampBehavior: 'offset'
+            };
 
-        muxer = new Muxer(muxerConfig);
+            if (hasAudio && config.audio && audioFormat) {
+                muxerConfig.audio = {
+                    codec: audioMuxerCodec,
+                    sampleRate: audioFormat.sampleRate,
+                    numberOfChannels: audioFormat.numberOfChannels
+                };
+            }
+
+            muxer = new MP4Muxer(muxerConfig);
+        }
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
@@ -105,10 +232,10 @@ export async function encodeToFile(file, config, onProgress) {
 
         videoEncoder.configure({
             codec: config.video.codec ?? 'avc1.640028',
-            width: config.video.width,
-            height: config.video.height,
+            width: outputWidth,
+            height: outputHeight,
             bitrate: config.video.bitrate,
-            framerate: config.video.framerate,
+            framerate: outputFramerate,
             latencyMode: 'quality'
         });
 
@@ -128,11 +255,18 @@ export async function encodeToFile(file, config, onProgress) {
 
             // Configure AudioEncoder with detected format from source file
             // This ensures compatibility with decoded audio data
+            // Apply AAC-LC bitrate rounding to valid values if needed
+            let audioBitrate = config.audio.bitrate;
+            if (config.audio.codec.startsWith('mp4a.40.2')) {
+                // AAC-LC: Round to nearest valid value using shared utility
+                audioBitrate = roundToValidAACLCBitrate(audioBitrate);
+            }
+            
             audioEncoder.configure({
                 codec: config.audio.codec ?? 'mp4a.40.2',
                 sampleRate: audioFormat.sampleRate,
                 numberOfChannels: audioFormat.numberOfChannels,
-                bitrate: config.audio.bitrate
+                bitrate: audioBitrate
             });
         }
     };

@@ -8,7 +8,7 @@ const DEMUX_PROGRESS_PERCENTAGE = 10;
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder
- * @param {(detectedFormat: {hasAudio: boolean, audioFormat?: {sampleRate: number, numberOfChannels: number}, totalFrames: number})=>void} onReady - Called when metadata is ready with detected format info
+ * @param {(detectedFormat: {hasAudio: boolean, audioFormat?: {sampleRate: number, numberOfChannels: number, bitrate: number|null}, videoFormat?: {width: number, height: number, codec: string, framerate: number|null, bitrate: number|null}, totalFrames: number})=>void} onReady - Called when metadata is ready with detected format info
  * @param {(pct:number)=>void} onProgress
  * @returns {Promise<{hasAudio: boolean}>}
  */
@@ -23,10 +23,31 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
 
         mp4boxfile.onReady = (info) => {
             const videoTrack = info.videoTracks?.[0];
+            let detectedVideoFormat = null;
             if (videoTrack) {
                 videoTrackId = videoTrack.id;
                 // Calculate total frames from track info
                 totalFrames = videoTrack.nb_samples ?? 0;
+                
+                // Calculate video bitrate from track info
+                let videoBitrate = null;
+                if (videoTrack.bitrate) {
+                    videoBitrate = videoTrack.bitrate;
+                } else if (videoTrack.movie_duration && info.size) {
+                    // Estimate from file size and duration (rough approximation)
+                    const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
+                    videoBitrate = Math.round((info.size * 8) / durationSec);
+                }
+                
+                detectedVideoFormat = {
+                    width: videoTrack.video.width,
+                    height: videoTrack.video.height,
+                    codec: videoTrack.codec,
+                    framerate: videoTrack.movie_duration && videoTrack.nb_samples 
+                        ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
+                        : null,
+                    bitrate: videoBitrate
+                };
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);
                 videoDecoder.configure({
@@ -42,9 +63,20 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             if (audioTrack && audioDecoder) {
                 hasAudio = true;
                 audioTrackId = audioTrack.id;
+                
+                // Calculate audio bitrate
+                let audioBitrate = null;
+                if (audioTrack.bitrate) {
+                    audioBitrate = audioTrack.bitrate;
+                } else if (audioTrack.audio.sample_rate && audioTrack.audio.channel_count) {
+                    // Rough estimate for common audio formats
+                    audioBitrate = 128000; // default estimate
+                }
+                
                 detectedAudioFormat = {
                     sampleRate: audioTrack.audio.sample_rate,
-                    numberOfChannels: audioTrack.audio.channel_count
+                    numberOfChannels: audioTrack.audio.channel_count,
+                    bitrate: audioBitrate
                 };
                 audioDecoder.configure({
                     codec: audioTrack.codec,
@@ -58,6 +90,7 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             onReady({
                 hasAudio,
                 audioFormat: detectedAudioFormat,
+                videoFormat: detectedVideoFormat,
                 totalFrames
             });
 

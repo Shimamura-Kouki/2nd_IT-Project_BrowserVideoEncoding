@@ -9,9 +9,10 @@
         "preview": "vite preview"
     },
     "dependencies": {
-        "svelte": "^5.0.0",
         "mp4-muxer": "^3.0.1",
-        "mp4box": "^0.5.4"
+        "mp4box": "^0.5.4",
+        "svelte": "^5.0.0",
+        "webm-muxer": "^5.1.4"
     },
     "devDependencies": {
         "@sveltejs/vite-plugin-svelte": "^4.0.0",
