@@ -1,4 +1,5 @@
 import MP4Box from 'mp4box';
+import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE } from '../constants.js';
 
 // Progress contribution: demuxing contributes 10% of total progress, encoding 90%
 const DEMUX_PROGRESS_PERCENTAGE = 10;
@@ -66,13 +67,13 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                     // Estimate from file size and duration
                     const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
                     const totalBitrate = Math.round((info.size * 8) / durationSec);
-                    // Subtract audio bitrate and estimated container overhead (2%)
-                    const containerOverhead = totalBitrate * 0.02;
+                    // Subtract audio bitrate and estimated container overhead
+                    const containerOverhead = totalBitrate * CONTAINER_OVERHEAD_PERCENTAGE;
                     const estimatedAudioBitrate = audioBitrate || 0;
                     videoBitrate = Math.round(totalBitrate - estimatedAudioBitrate - containerOverhead);
                     // Ensure video bitrate is at least positive
-                    if (videoBitrate < 100000) {
-                        videoBitrate = 100000; // minimum 100 Kbps
+                    if (videoBitrate < MINIMUM_VIDEO_BITRATE) {
+                        videoBitrate = MINIMUM_VIDEO_BITRATE;
                     }
                 }
                 

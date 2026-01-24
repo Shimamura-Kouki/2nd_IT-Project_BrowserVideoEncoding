@@ -3,6 +3,7 @@
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
   import { roundToValidAACBitrate } from './lib/utils/audioUtils.js';
+  import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE } from './lib/constants.js';
   import MP4Box from 'mp4box';
 
   let file: File | null = null;
@@ -158,12 +159,12 @@
               const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
               // Calculate total bitrate from file size
               const totalBitrate = Math.round((info.size * 8) / durationSec);
-              // Subtract audio bitrate and estimated container overhead (2%)
-              const containerOverhead = totalBitrate * 0.02;
+              // Subtract audio bitrate and estimated container overhead
+              const containerOverhead = totalBitrate * CONTAINER_OVERHEAD_PERCENTAGE;
               originalVideoBitrate = Math.round(totalBitrate - originalAudioBitrate - containerOverhead);
               // Ensure video bitrate is at least positive
-              if (originalVideoBitrate < 100000) {
-                originalVideoBitrate = 100000; // minimum 100 Kbps
+              if (originalVideoBitrate < MINIMUM_VIDEO_BITRATE) {
+                originalVideoBitrate = MINIMUM_VIDEO_BITRATE;
               }
             }
           }
