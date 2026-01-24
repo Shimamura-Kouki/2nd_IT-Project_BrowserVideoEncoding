@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
-  import { roundToValidAACLCBitrate } from './lib/utils/audioUtils.js';
+  import { roundToValidAACBitrate } from './lib/utils/audioUtils.js';
   import MP4Box from 'mp4box';
 
   let file: File | null = null;
@@ -73,7 +73,7 @@
     
     if (containerFormat === 'mp4') {
       if (qualityLevel === '低' || qualityLevel === '最低') {
-        // Low quality: use AAC-HE (min 32 Kbps)
+        // Low quality: use AAC-HE (min 96 Kbps)
         if (audioCodec.startsWith('mp4a.40.2')) {
           audioCodec = 'mp4a.40.5';
         }
@@ -286,13 +286,16 @@
         if (result > AAC_LC_MAX) result = AAC_LC_MAX;
         
         // Round to nearest valid value using shared utility
-        result = roundToValidAACLCBitrate(result);
+        result = roundToValidAACBitrate(result);
       } else if (effectiveAudioCodec.startsWith('mp4a.40.5')) {
-        // AAC-HE: minimum 32 Kbps, maximum 128 Kbps
-        const AAC_HE_MIN = 32_000;
-        const AAC_HE_MAX = 128_000;
+        // AAC-HE: Must be one of [96, 128, 160, 192] Kbps (same as AAC-LC)
+        const AAC_HE_MIN = 96_000;
+        const AAC_HE_MAX = 192_000;
         if (result < AAC_HE_MIN) result = AAC_HE_MIN;
         if (result > AAC_HE_MAX) result = AAC_HE_MAX;
+        
+        // Round to nearest valid value using shared utility
+        result = roundToValidAACBitrate(result);
       }
     }
 
