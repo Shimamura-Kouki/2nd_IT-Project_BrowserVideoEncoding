@@ -15,6 +15,14 @@
   let encoding = false;
   let message = '';
 
+  // Source file metadata (extracted from demuxer)
+  let originalWidth = 0;
+  let originalHeight = 0;
+  let originalFramerate = 0;
+  let originalVideoBitrate = 0;
+  let originalAudioBitrate = 0;
+  let sourceFileAnalyzed = false;
+
   // Required settings
   let containerFormat = 'mp4';
   let videoCodec = 'avc1.640028';
@@ -31,8 +39,11 @@
   // Frame rate settings
   let framerateMode = 'manual'; // 'original', 'manual'
   let framerate = 30;
-  let videoBitrate = 5000; // in Kbps
-  let audioBitrate = 128; // in Kbps
+  
+  // Bitrate settings - quality-based
+  let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム
+  let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム'
+  let customAudioBitrate = 128; // in Kbps, used when qualityLevel is 'カスタム'
 
   // Optional settings
   let rotation = 0;
@@ -51,7 +62,72 @@
   const pickFile = (e: Event) => {
     const input = e.target as HTMLInputElement;
     file = input.files?.[0] ?? null;
+    sourceFileAnalyzed = false; // Reset analysis state when new file is picked
+    originalWidth = 0;
+    originalHeight = 0;
+    originalFramerate = 0;
+    originalVideoBitrate = 0;
+    originalAudioBitrate = 0;
   };
+
+  // Calculate bitrate based on quality level and codec
+  function calculateBitrate(isVideo: boolean): number {
+    const baseRate = isVideo ? originalVideoBitrate : originalAudioBitrate;
+    if (!baseRate || baseRate === 0) {
+      // Fallback if no original bitrate detected
+      return isVideo ? 5_000_000 : 128_000;
+    }
+
+    let multiplier = 1.0;
+    switch (qualityLevel) {
+      case '最高': multiplier = 1.0; break;
+      case '高': multiplier = 0.8; break;
+      case '中': multiplier = 0.6; break;
+      case '低': multiplier = 0.4; break;
+      case '最低': multiplier = 0.25; break;
+      case 'カスタム': 
+        return isVideo ? customVideoBitrate * 1000 : customAudioBitrate * 1000;
+    }
+
+    let result = baseRate * multiplier;
+
+    // Adjust for codec efficiency (video only)
+    if (isVideo) {
+      if (videoCodec.startsWith('vp09')) {
+        result *= 0.7; // VP9 is ~30% more efficient
+      } else if (videoCodec.startsWith('av01')) {
+        result *= 0.6; // AV1 is ~40% more efficient
+      }
+
+      // Adjust for resolution if different from original
+      if (resolutionMode !== 'original') {
+        let targetWidth = originalWidth;
+        let targetHeight = originalHeight;
+        
+        if (resolutionMode === 'preset') {
+          const res = resolutionPresets[resolutionPreset];
+          targetWidth = res.width;
+          targetHeight = res.height;
+        } else if (resolutionMode === 'manual') {
+          targetWidth = manualWidth;
+          targetHeight = manualHeight;
+        } else if (resolutionMode === 'width-only') {
+          targetWidth = widthOnly;
+          targetHeight = Math.round((widthOnly / originalWidth) * originalHeight);
+        } else if (resolutionMode === 'height-only') {
+          targetWidth = Math.round((heightOnly / originalHeight) * originalWidth);
+          targetHeight = heightOnly;
+        }
+        
+        const originalPixels = originalWidth * originalHeight;
+        const targetPixels = targetWidth * targetHeight;
+        const pixelRatio = targetPixels / originalPixels;
+        result *= pixelRatio;
+      }
+    }
+
+    return Math.round(result);
+  }
 
   function applyPreset() {
     const preset = presets[selectedPresetIndex]?.config_json ?? presets[selectedPresetIndex];
@@ -60,8 +136,15 @@
       containerFormat = preset.container ?? 'mp4';
       videoCodec = preset.codec ?? 'avc1.640028';
       audioCodec = preset.audioCodec ?? 'mp4a.40.2';
-      videoBitrate = (preset.bitrate ?? 5_000_000) / 1000;
-      audioBitrate = (preset.audio_bitrate ?? 128_000) / 1000;
+      
+      // Set quality level based on preset bitrate
+      if (preset.preserveOriginal) {
+        qualityLevel = '高'; // Default quality for preserve presets
+      } else {
+        qualityLevel = '中'; // Default quality for standard presets
+      }
+      customVideoBitrate = (preset.bitrate ?? 5_000_000) / 1000;
+      customAudioBitrate = (preset.audio_bitrate ?? 128_000) / 1000;
       framerate = preset.framerate ?? 30;
       
       // Handle "元ファイルを維持" presets
@@ -120,13 +203,16 @@
       height = heightOnly;
     }
 
+    const videoBitrate = calculateBitrate(true);
+    const audioBitrate = calculateBitrate(false);
+
     const config = {
       video: { 
         codec: videoCodec, 
         container: containerFormat,
         width: width, 
         height: height, 
-        bitrate: videoBitrate * 1000, 
+        bitrate: videoBitrate, 
         framerate: framerate,
         framerateMode: framerateMode,
         rotation: rotation,
@@ -137,17 +223,28 @@
         codec: audioCodec, 
         sampleRate: 44100, 
         numberOfChannels: 2, 
-        bitrate: audioBitrate * 1000 
+        bitrate: audioBitrate 
       }
     };
 
     const start = performance.now();
-    await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number, etaMs?: number }) => {
+    await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number, etaMs?: number }, metadata?: any) => {
       if (pct !== undefined) progressPct = pct;
       if (stats) { 
         fps = stats.fps; 
         elapsedMs = stats.elapsedMs;
         etaMs = stats.etaMs ?? 0;
+      }
+      // Capture source file metadata when available
+      if (metadata && metadata.videoFormat && !sourceFileAnalyzed) {
+        originalWidth = metadata.videoFormat.width || 0;
+        originalHeight = metadata.videoFormat.height || 0;
+        originalFramerate = metadata.videoFormat.framerate || 0;
+        originalVideoBitrate = metadata.videoFormat.bitrate || 0;
+        if (metadata.audioFormat) {
+          originalAudioBitrate = metadata.audioFormat.bitrate || 0;
+        }
+        sourceFileAnalyzed = true;
       }
     });
 
@@ -351,6 +448,17 @@
   {#if file}
     <div class="panel">
       <p>選択: {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)</p>
+      {#if sourceFileAnalyzed}
+        <p style="color: #666; font-size: 12px; margin-top: 8px;">
+          元ファイル情報: {originalWidth}×{originalHeight} @ {originalFramerate.toFixed(1)}fps
+          {#if originalVideoBitrate > 0}
+            | 映像: {(originalVideoBitrate / 1000000).toFixed(1)}Mbps
+          {/if}
+          {#if originalAudioBitrate > 0}
+            | 音声: {(originalAudioBitrate / 1000).toFixed(0)}Kbps
+          {/if}
+        </p>
+      {/if}
     </div>
   {/if}
 
@@ -435,14 +543,27 @@
           <div class="row">
             <label>解像度プリセット:</label>
             <select bind:value={resolutionPreset}>
-              <option value="2160p">4K (3840×2160)</option>
-              <option value="1440p">1440p (2560×1440)</option>
-              <option value="1080p">1080p (1920×1080)</option>
-              <option value="720p">720p (1280×720)</option>
+              <option value="2160p" disabled={sourceFileAnalyzed && (originalWidth < 3840 || originalHeight < 2160)}>
+                4K (3840×2160) {sourceFileAnalyzed && (originalWidth < 3840 || originalHeight < 2160) ? '(元ファイルより大きい)' : ''}
+              </option>
+              <option value="1440p" disabled={sourceFileAnalyzed && (originalWidth < 2560 || originalHeight < 1440)}>
+                1440p (2560×1440) {sourceFileAnalyzed && (originalWidth < 2560 || originalHeight < 1440) ? '(元ファイルより大きい)' : ''}
+              </option>
+              <option value="1080p" disabled={sourceFileAnalyzed && (originalWidth < 1920 || originalHeight < 1080)}>
+                1080p (1920×1080) {sourceFileAnalyzed && (originalWidth < 1920 || originalHeight < 1080) ? '(元ファイルより大きい)' : ''}
+              </option>
+              <option value="720p" disabled={sourceFileAnalyzed && (originalWidth < 1280 || originalHeight < 720)}>
+                720p (1280×720) {sourceFileAnalyzed && (originalWidth < 1280 || originalHeight < 720) ? '(元ファイルより大きい)' : ''}
+              </option>
               <option value="480p">480p (854×480)</option>
               <option value="360p">360p (640×360)</option>
             </select>
           </div>
+          {#if sourceFileAnalyzed && resolutionPresets[resolutionPreset]}
+            {#if resolutionPresets[resolutionPreset].width > originalWidth || resolutionPresets[resolutionPreset].height > originalHeight}
+              <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ 選択した解像度は元ファイルより大きいため、画質が劣化する可能性があります</p>
+            {/if}
+          {/if}
         {:else if resolutionMode === 'manual'}
           <div class="row">
             <label>幅 (px):</label>
@@ -477,19 +598,53 @@
         {#if framerateMode === 'manual'}
           <div class="row">
             <label>フレームレート (fps):</label>
-            <input type="number" bind:value={framerate} min="1" max="120" step="1" />
+            <input 
+              type="number" 
+              bind:value={framerate} 
+              min="1" 
+              max={sourceFileAnalyzed && originalFramerate > 0 ? originalFramerate : 120} 
+              step="1" 
+            />
           </div>
+          {#if sourceFileAnalyzed && originalFramerate > 0 && framerate > originalFramerate}
+            <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ フレームレートを元ファイル({originalFramerate.toFixed(1)}fps)より高く設定しても品質は向上しません</p>
+          {/if}
         {/if}
 
         <div class="row">
-          <label>映像ビットレート (Kbps):</label>
-          <input type="number" bind:value={videoBitrate} min="100" max="50000" step="100" />
+          <label>ビットレート品質:</label>
+          <select bind:value={qualityLevel}>
+            <option value="最高">最高 (元ファイルと同等)</option>
+            <option value="高">高 (元の80%)</option>
+            <option value="中">中 (元の60%) - 推奨</option>
+            <option value="低">低 (元の40%)</option>
+            <option value="最低">最低 (元の25%)</option>
+            <option value="カスタム">カスタム</option>
+          </select>
         </div>
 
-        <div class="row">
-          <label>音声ビットレート (Kbps):</label>
-          <input type="number" bind:value={audioBitrate} min="32" max="320" step="8" />
-        </div>
+        {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
+          <p style="color: #666; font-size: 12px; margin-top: -8px;">
+            推定ビットレート: 映像 {(calculateBitrate(true) / 1000000).toFixed(1)}Mbps / 音声 {(calculateBitrate(false) / 1000).toFixed(0)}Kbps
+            {#if videoCodec.startsWith('vp09')}
+              (VP9コーデックにより最適化)
+            {:else if videoCodec.startsWith('av01')}
+              (AV1コーデックにより最適化)
+            {/if}
+          </p>
+        {/if}
+
+        {#if qualityLevel === 'カスタム'}
+          <div class="row">
+            <label>映像ビットレート (Kbps):</label>
+            <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
+          </div>
+
+          <div class="row">
+            <label>音声ビットレート (Kbps):</label>
+            <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
+          </div>
+        {/if}
       </div>
 
       <!-- Optional Settings -->
