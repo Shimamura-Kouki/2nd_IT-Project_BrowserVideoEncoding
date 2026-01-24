@@ -88,14 +88,6 @@ export async function encodeToFile(file, config, onProgress) {
         // Pass metadata to the progress callback
         onProgress(undefined, undefined, detectedFormat);
         
-        // Check for unsupported features and log warnings
-        if (config.video.rotation && config.video.rotation !== 0) {
-            console.warn('Video rotation is not yet implemented and will be ignored.');
-        }
-        if (config.video.flipHorizontal || config.video.flipVertical) {
-            console.warn('Video flipping is not yet implemented and will be ignored.');
-        }
-        
         // Determine output framerate
         let outputFramerate = config.video.framerate;
         if (config.video.framerateMode === 'original' && videoFormat?.framerate) {

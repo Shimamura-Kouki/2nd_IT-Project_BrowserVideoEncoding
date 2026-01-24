@@ -50,11 +50,6 @@
   let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム'
   let customAudioBitrate = 128; // in Kbps, used when qualityLevel is 'カスタム'
 
-  // Optional settings
-  let rotation = 0;
-  let flipHorizontal = false;
-  let flipVertical = false;
-
   // Auto-change container based on video codec selection only (to avoid cycles)
   $: {
     if (videoCodec.startsWith('vp09') || videoCodec.startsWith('vp08') || videoCodec.startsWith('av01')) {
@@ -388,10 +383,7 @@
         height: height, 
         bitrate: videoBitrate, 
         framerate: framerate,
-        framerateMode: framerateMode,
-        rotation: rotation,
-        flipHorizontal: flipHorizontal,
-        flipVertical: flipVertical
+        framerateMode: framerateMode
       },
       audio: { 
         codec: audioCodec, 
