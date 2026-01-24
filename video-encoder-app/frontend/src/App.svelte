@@ -45,7 +45,7 @@
   let framerate = 30;
   
   // Bitrate settings - quality-based
-  let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム
+  let qualityLevel = '中'; // 最高, 高, 中, 低, カスタム
   let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム'
   let customAudioBitrate = 128; // in Kbps, used when qualityLevel is 'カスタム'
 
@@ -63,7 +63,7 @@
     }
   }
 
-  // Auto-switch audio codec based on quality level and container (for MP4)
+  // Auto-switch audio codec based on container format
   $: {
     // Only auto-switch for MP4 containers to avoid opus conflicts
     if (containerFormat === 'mp4' && !audioCodec.startsWith('mp4a')) {
@@ -71,17 +71,10 @@
       audioCodec = 'mp4a.40.2';
     }
     
+    // Always use AAC-LC for MP4 containers
     if (containerFormat === 'mp4') {
-      if (qualityLevel === '低' || qualityLevel === '最低') {
-        // Low quality: use AAC-HE (min 96 Kbps)
-        if (audioCodec.startsWith('mp4a.40.2')) {
-          audioCodec = 'mp4a.40.5';
-        }
-      } else if (qualityLevel === '中' || qualityLevel === '高' || qualityLevel === '最高') {
-        // Medium or higher quality: use AAC-LC (min 96 Kbps)
-        if (audioCodec.startsWith('mp4a.40.5')) {
-          audioCodec = 'mp4a.40.2';
-        }
+      if (audioCodec.startsWith('mp4a.40.5')) {
+        audioCodec = 'mp4a.40.2';
       }
     } else if (containerFormat === 'webm' && audioCodec.startsWith('mp4a')) {
       // If we switched to WebM but still have AAC, switch to Opus
@@ -203,7 +196,6 @@
         case '高': multiplier = 0.8; break;
         case '中': multiplier = 0.6; break;
         case '低': multiplier = 0.4; break;
-        case '最低': multiplier = 0.25; break;
       }
       result = baseRate * multiplier;
     }
@@ -253,20 +245,12 @@
       // Apply audio codec multipliers if needed
       // (none currently, but this is where they would go)
       
-      // Determine which codec SHOULD be used based on quality level (for MP4)
-      // This ensures we apply correct constraints even before reactive switching completes
+      // Determine which codec SHOULD be used based on container format
+      // For MP4 containers, always use AAC-LC
       let effectiveAudioCodec = audioCodec;
       if (containerFormat === 'mp4') {
-        if (qualityLevel === '低' || qualityLevel === '最低') {
-          // Low quality should use AAC-HE
-          if (audioCodec.startsWith('mp4a.40.2') || audioCodec.startsWith('mp4a.40.5')) {
-            effectiveAudioCodec = 'mp4a.40.5'; // Force AAC-HE for calculation
-          }
-        } else if (qualityLevel === '中' || qualityLevel === '高' || qualityLevel === '最高') {
-          // Medium+ quality should use AAC-LC
-          if (audioCodec.startsWith('mp4a.40.2') || audioCodec.startsWith('mp4a.40.5')) {
-            effectiveAudioCodec = 'mp4a.40.2'; // Force AAC-LC for calculation
-          }
+        if (audioCodec.startsWith('mp4a.40.2') || audioCodec.startsWith('mp4a.40.5')) {
+          effectiveAudioCodec = 'mp4a.40.2'; // Always use AAC-LC for MP4
         }
       }
       
@@ -741,7 +725,6 @@
           <option value="高">高 (元の80%)</option>
           <option value="中">中 (元の60%) - 推奨</option>
           <option value="低">低 (元の40%)</option>
-          <option value="最低">最低 (元の25%)</option>
           <option value="カスタム">カスタム</option>
         </select>
       </div>
