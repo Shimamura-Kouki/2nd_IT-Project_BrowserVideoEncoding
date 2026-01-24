@@ -2,7 +2,8 @@ name: Build and deploy static site
 
 on:
   push:
-    branches: [ feature/static-github-pages ]
+    branches: 
+      - feature/static-github-pages
   workflow_dispatch:
 
 permissions:
