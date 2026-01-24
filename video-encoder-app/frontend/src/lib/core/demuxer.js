@@ -36,8 +36,8 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 // Calculate audio bitrate
                 if (audioTrack.bitrate) {
                     audioBitrate = audioTrack.bitrate;
-                } else if (audioTrack.audio.sample_rate && audioTrack.audio.channel_count) {
-                    // Rough estimate for common audio formats
+                } else {
+                    // Rough estimate for common audio formats when bitrate is not available
                     audioBitrate = 128000; // default estimate
                 }
                 
