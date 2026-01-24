@@ -132,6 +132,18 @@
         
         mp4boxfile.onReady = (info: any) => {
           const videoTrack = info.videoTracks?.[0];
+          const audioTrack = info.audioTracks?.[0];
+          
+          // First, determine audio bitrate
+          if (audioTrack) {
+            // Calculate audio bitrate
+            if (audioTrack.bitrate) {
+              originalAudioBitrate = audioTrack.bitrate;
+            } else {
+              originalAudioBitrate = 128000; // default estimate
+            }
+          }
+          
           if (videoTrack) {
             originalWidth = videoTrack.video.width;
             originalHeight = videoTrack.video.height;
@@ -144,17 +156,15 @@
               originalVideoBitrate = videoTrack.bitrate;
             } else if (videoTrack.movie_duration && info.size) {
               const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
-              originalVideoBitrate = Math.round((info.size * 8) / durationSec);
-            }
-          }
-          
-          const audioTrack = info.audioTracks?.[0];
-          if (audioTrack) {
-            // Calculate audio bitrate
-            if (audioTrack.bitrate) {
-              originalAudioBitrate = audioTrack.bitrate;
-            } else {
-              originalAudioBitrate = 128000; // default estimate
+              // Calculate total bitrate from file size
+              const totalBitrate = Math.round((info.size * 8) / durationSec);
+              // Subtract audio bitrate and estimated container overhead (2%)
+              const containerOverhead = totalBitrate * 0.02;
+              originalVideoBitrate = Math.round(totalBitrate - originalAudioBitrate - containerOverhead);
+              // Ensure video bitrate is at least positive
+              if (originalVideoBitrate < 100000) {
+                originalVideoBitrate = 100000; // minimum 100 Kbps
+              }
             }
           }
           
@@ -591,24 +601,6 @@
     border-bottom: 2px solid #2979ff;
   }
 
-  .checkbox-group {
-    display: flex;
-    gap: 24px;
-    align-items: center;
-  }
-
-  .checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-  }
-
-  .checkbox-label input[type="checkbox"] {
-    width: auto;
-    min-width: auto;
-  }
-
   .row input[type="number"] {
     flex: 0 1 150px;
   }
@@ -870,38 +862,6 @@
             <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ フレームレートを元ファイル({originalFramerate.toFixed(1)}fps)より高く設定しても品質は向上しません</p>
           {/if}
         {/if}
-      </div>
-
-      <!-- Optional Settings -->
-      <div class="panel">
-        <h3 class="section-title">任意設定</h3>
-        <p style="color: #ff9800; background: #fff3e0; padding: 8px; border-radius: 4px; font-size: 12px; margin-bottom: 16px;">
-          ⚠️ 回転と反転機能は現在開発中のため、設定しても適用されません
-        </p>
-        
-        <div class="row">
-          <label>映像の回転:</label>
-          <select bind:value={rotation}>
-            <option value={0}>0度</option>
-            <option value={90}>90度</option>
-            <option value={180}>180度</option>
-            <option value={270}>270度</option>
-          </select>
-        </div>
-
-        <div class="row">
-          <label>映像の反転:</label>
-          <div class="checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" bind:checked={flipHorizontal} />
-              <span>左右反転</span>
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" bind:checked={flipVertical} />
-              <span>上下反転</span>
-            </label>
-          </div>
-        </div>
       </div>
     {/if}
 

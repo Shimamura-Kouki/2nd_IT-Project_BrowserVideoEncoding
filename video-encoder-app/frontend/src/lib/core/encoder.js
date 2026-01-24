@@ -23,8 +23,13 @@ export async function encodeToFile(file, config, onProgress) {
     const fileExtension = container === 'webm' ? '.webm' : (container === 'mov' ? '.mov' : '.mp4');
     const mimeType = container === 'webm' ? 'video/webm' : 'video/mp4';
     
+    // Generate output filename based on original file and bitrate
+    const originalNameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+    const videoBitrateMbps = (config.video.bitrate / 1000000).toFixed(1);
+    const suggestedName = `${originalNameWithoutExt}_${videoBitrateMbps}Mbps${fileExtension}`;
+    
     const handle = await window.showSaveFilePicker({
-        suggestedName: `output${fileExtension}`,
+        suggestedName: suggestedName,
         types: [{ description: 'Video File', accept: { [mimeType]: [fileExtension] } }]
     });
     const fileStream = await handle.createWritable();
