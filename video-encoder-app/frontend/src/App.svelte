@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
+  import { roundToValidAACLCBitrate } from './lib/utils/audioUtils.js';
   import MP4Box from 'mp4box';
 
   let file: File | null = null;
@@ -15,6 +16,8 @@
   let etaMs = 0;
   let encoding = false;
   let message = '';
+  let errorLogs: string[] = [];
+  let showErrorLogs = false;
 
   // Source file metadata (extracted from demuxer)
   let originalWidth = 0;
@@ -183,6 +186,42 @@
         const pixelRatio = targetPixels / originalPixels;
         result *= pixelRatio;
       }
+      
+      // Apply maximum video bitrate cap: 50 Mbps
+      const VIDEO_MAX_BITRATE = 50_000_000;
+      if (result > VIDEO_MAX_BITRATE) {
+        result = VIDEO_MAX_BITRATE;
+      }
+    } else {
+      // Audio bitrate handling with codec-specific constraints
+      
+      // Apply audio codec multipliers if needed
+      // (none currently, but this is where they would go)
+      
+      // Enforce codec-specific bitrate constraints and caps
+      if (audioCodec === 'opus') {
+        // Opus: minimum 32 Kbps, maximum 256 Kbps
+        const OPUS_MIN = 32_000;
+        const OPUS_MAX = 256_000;
+        if (result < OPUS_MIN) result = OPUS_MIN;
+        if (result > OPUS_MAX) result = OPUS_MAX;
+      } else if (audioCodec.startsWith('mp4a.40.2')) {
+        // AAC-LC: Must be one of [96, 128, 160, 192] Kbps
+        const AAC_LC_MIN = 96_000;
+        const AAC_LC_MAX = 192_000;
+        
+        if (result < AAC_LC_MIN) result = AAC_LC_MIN;
+        if (result > AAC_LC_MAX) result = AAC_LC_MAX;
+        
+        // Round to nearest valid value using shared utility
+        result = roundToValidAACLCBitrate(result);
+      } else if (audioCodec.startsWith('mp4a.40.5')) {
+        // AAC-HE: minimum 32 Kbps, maximum 128 Kbps
+        const AAC_HE_MIN = 32_000;
+        const AAC_HE_MAX = 128_000;
+        if (result < AAC_HE_MIN) result = AAC_HE_MIN;
+        if (result > AAC_HE_MAX) result = AAC_HE_MAX;
+      }
     }
 
     return Math.round(result);
@@ -238,7 +277,21 @@
   async function startEncoding() {
     if (!file) return;
     message = '';
+    errorLogs = []; // Clear error logs when starting new encoding
     encoding = true;
+    
+    // Auto-switch audio codec based on quality level
+    if (qualityLevel === '低' || qualityLevel === '最低') {
+      // Low quality: use AAC-HE
+      if (audioCodec.startsWith('mp4a.40.2')) {
+        audioCodec = 'mp4a.40.5'; // Switch to AAC-HE
+      }
+    } else if (qualityLevel === '中' || qualityLevel === '高' || qualityLevel === '最高') {
+      // Medium or higher quality: use AAC-LC
+      if (audioCodec.startsWith('mp4a.40.5')) {
+        audioCodec = 'mp4a.40.2'; // Switch to AAC-LC
+      }
+    }
 
     let width: number | undefined;
     let height: number | undefined;
@@ -321,6 +374,25 @@
 
   onMount(() => {
     presets = loadPresets();
+    
+    // Intercept console.error to capture error logs
+    const originalConsoleError = console.error;
+    console.error = function(...args) {
+      // Call original console.error
+      originalConsoleError.apply(console, args);
+      
+      // Add to error logs with timestamp
+      const timestamp = new Date().toLocaleTimeString('ja-JP');
+      const errorMessage = args.map(arg => 
+        typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+      ).join(' ');
+      errorLogs = [...errorLogs, `[${timestamp}] ${errorMessage}`];
+    };
+    
+    // Cleanup: restore original console.error when component is destroyed
+    return () => {
+      console.error = originalConsoleError;
+    };
   });
 </script>
 
@@ -492,6 +564,47 @@
 
   .preset-toggle {
     margin-bottom: 16px;
+  }
+
+  .error-logs {
+    background: #fff5f5;
+    border: 1px solid #ffcdd2;
+    border-radius: 4px;
+    padding: 12px;
+    margin-top: 16px;
+  }
+
+  .error-logs-toggle {
+    background: #f44336;
+    color: white;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-bottom: 12px;
+    width: 100%;
+  }
+
+  .error-logs-toggle:hover {
+    background: #d32f2f;
+  }
+
+  .error-logs-content {
+    max-height: 200px;
+    overflow-y: auto;
+    background: white;
+    padding: 8px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .error-log-item {
+    margin-bottom: 4px;
+    color: #c62828;
   }
 
 </style>
@@ -752,6 +865,24 @@
         <p>FPS: {fps > 0 ? fps.toFixed(1) : '-'} | 経過: {(elapsedMs/1000).toFixed(1)}s</p>
         {#if etaMs > 0 && progressPct < 100}
           <p>推定残り時間: {(etaMs/1000).toFixed(1)}s</p>
+        {/if}
+      </div>
+    {/if}
+
+    {#if errorLogs.length > 0}
+      <div class="error-logs">
+        <button 
+          class="error-logs-toggle" 
+          on:click={() => showErrorLogs = !showErrorLogs}
+        >
+          {showErrorLogs ? 'エラーログを非表示' : `エラーログを表示 (${errorLogs.length}件)`}
+        </button>
+        {#if showErrorLogs}
+          <div class="error-logs-content">
+            {#each errorLogs as log}
+              <div class="error-log-item">{log}</div>
+            {/each}
+          </div>
         {/if}
       </div>
     {/if}
