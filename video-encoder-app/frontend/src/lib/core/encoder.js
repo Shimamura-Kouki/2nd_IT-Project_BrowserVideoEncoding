@@ -129,6 +129,11 @@ export async function encodeToFile(file, config, onProgress) {
                     }
                 }
             }
+            // If neither width nor height is specified, use original dimensions
+            else if (!outputWidth && !outputHeight) {
+                outputWidth = originalWidth;
+                outputHeight = originalHeight;
+            }
             
             // Prevent upscaling: don't exceed original dimensions
             if (outputWidth > originalWidth || outputHeight > originalHeight) {
