@@ -238,7 +238,13 @@
         const originalPixels = originalWidth * originalHeight;
         const targetPixels = targetWidth * targetHeight;
         const pixelRatio = targetPixels / originalPixels;
-        result *= pixelRatio;
+        
+        // Don't increase bitrate when upscaling (pixel ratio > 1)
+        // Upscaling doesn't improve quality, so cap at original bitrate
+        if (pixelRatio <= 1.0) {
+          result *= pixelRatio;
+        }
+        // If upscaling (pixelRatio > 1), keep result as-is (don't scale up)
       }
       
       // Apply maximum video bitrate cap: 50 Mbps
