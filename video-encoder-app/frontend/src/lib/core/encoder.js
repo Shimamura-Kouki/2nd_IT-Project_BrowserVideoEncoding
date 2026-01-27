@@ -277,14 +277,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
-                // Ignore chunks that arrive after muxer finalization with a warning
-                // This can happen with VP9/VP8 encoders which may have delayed callbacks
-                if (muxerFinalized) {
-                    console.warn('VideoEncoder output callback fired after muxer finalization - ignoring chunk');
-                    return;
-                }
+                // Increment counter first to ensure proper tracking
                 pendingVideoChunks++;
                 try {
+                    // Ignore chunks that arrive after muxer finalization with a warning
+                    // This can happen with VP9/VP8 encoders which may have delayed callbacks
+                    if (muxerFinalized) {
+                        console.warn('VideoEncoder output callback fired after muxer finalization - ignoring chunk');
+                        return;
+                    }
                     muxer.addVideoChunk(chunk, meta);
                 } finally {
                     pendingVideoChunks--;
@@ -306,14 +307,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
-                    // Ignore chunks that arrive after muxer finalization with a warning
-                    // This can happen with some audio encoders which may have delayed callbacks
-                    if (muxerFinalized) {
-                        console.warn('AudioEncoder output callback fired after muxer finalization - ignoring chunk');
-                        return;
-                    }
+                    // Increment counter first to ensure proper tracking
                     pendingAudioChunks++;
                     try {
+                        // Ignore chunks that arrive after muxer finalization with a warning
+                        // This can happen with some audio encoders which may have delayed callbacks
+                        if (muxerFinalized) {
+                            console.warn('AudioEncoder output callback fired after muxer finalization - ignoring chunk');
+                            return;
+                        }
                         muxer.addAudioChunk(chunk, meta);
                     } finally {
                         pendingAudioChunks--;
