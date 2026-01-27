@@ -569,14 +569,14 @@
 
   :global(body) {
     font-family: system-ui, sans-serif;
-    background: #f5f5f5;
+    background: var(--color-background);
     padding: 20px;
   }
 
   .container {
     max-width: 960px;
     margin: 0 auto;
-    background: white;
+    background: var(--color-surface);
     padding: 24px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -584,22 +584,23 @@
 
   h1 {
     margin-bottom: 24px;
-    color: #333;
+    color: var(--color-text);
   }
 
   .dropzone {
-    border: 2px dashed #888;
+    border: 2px dashed var(--color-border);
     padding: 40px;
     text-align: center;
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.3s;
     margin-bottom: 24px;
+    background: var(--color-surface);
   }
 
   .dropzone:hover {
-    border-color: #2979ff;
-    background: #f0f7ff;
+    border-color: var(--color-primary);
+    background: var(--color-progressBg);
   }
 
   .dropzone input {
@@ -607,14 +608,14 @@
   }
 
   .dropzone p {
-    color: #666;
+    color: var(--color-textSecondary);
     margin-top: 8px;
   }
 
   .panel {
     margin-bottom: 24px;
     padding-bottom: 24px;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .panel:last-child {
@@ -631,7 +632,7 @@
 
   .row label {
     font-weight: 500;
-    color: #333;
+    color: var(--color-text);
     min-width: 100px;
   }
 
@@ -640,21 +641,23 @@
     flex: 1;
     min-width: 200px;
     padding: 8px 12px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--color-border);
     border-radius: 4px;
     font-size: 14px;
+    background: var(--color-surface);
+    color: var(--color-text);
   }
 
   .row input:focus,
   .row select:focus {
     outline: none;
-    border-color: #2979ff;
+    border-color: var(--color-primary);
     box-shadow: 0 0 0 3px rgba(41, 121, 255, 0.1);
   }
 
   .progress {
     height: 8px;
-    background: #eee;
+    background: var(--color-progressBg);
     border-radius: 4px;
     overflow: hidden;
     margin-bottom: 8px;
@@ -662,14 +665,14 @@
 
   .progress > div {
     height: 100%;
-    background: #2979ff;
+    background: var(--color-primary);
     width: 0%;
     transition: width 0.2s;
   }
 
   button {
     padding: 10px 16px;
-    background: #2979ff;
+    background: var(--color-primary);
     color: white;
     border: none;
     border-radius: 4px;
@@ -681,13 +684,13 @@
   }
 
   button:hover {
-    background: #1e5db8;
+    background: var(--color-primaryHover);
   }
 
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    background: #ccc;
+    background: var(--color-border);
   }
 
   p {
@@ -726,15 +729,15 @@
   }
 
   .error-logs {
-    background: #fff5f5;
-    border: 1px solid #ffcdd2;
+    background: var(--color-surface);
+    border: 1px solid var(--color-error);
     border-radius: 4px;
     padding: 12px;
     margin-top: 16px;
   }
 
   .error-logs-toggle {
-    background: #f44336;
+    background: var(--color-error);
     color: white;
     padding: 8px 12px;
     border: none;
@@ -746,24 +749,26 @@
   }
 
   .error-logs-toggle:hover {
-    background: #d32f2f;
+    background: var(--color-error);
+    opacity: 0.9;
   }
 
   .error-logs-content {
     max-height: 200px;
     overflow-y: auto;
-    background: white;
+    background: var(--color-background);
     padding: 8px;
     border-radius: 4px;
     font-family: 'Courier New', monospace;
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-all;
+    color: var(--color-text);
   }
 
   .error-log-item {
     margin-bottom: 4px;
-    color: #c62828;
+    color: var(--color-error);
   }
 
 </style>
