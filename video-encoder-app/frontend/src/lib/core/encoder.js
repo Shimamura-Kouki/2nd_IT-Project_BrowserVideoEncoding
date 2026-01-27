@@ -103,7 +103,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let completionCheckTimeout = null;
     
     // Guard flag to prevent multiple initializations
-    // This prevents the race condition where mp4boxfile.onReady fires multiple times
+    // This prevents the race condition where initializeEncoders is called multiple times
+    // (e.g., if demuxer's onReady callback fires multiple times)
     // causing multiple muxer instances and encoder reconfigurations
     let encodersInitialized = false;
 

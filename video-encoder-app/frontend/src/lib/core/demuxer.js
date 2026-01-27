@@ -22,7 +22,10 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         let detectedAudioFormat = null;
         let totalFrames = 0;
         // Guard flag to prevent multiple onReady callbacks
-        // MP4Box.js may fire onReady multiple times in some cases
+        // MP4Box.js may fire onReady multiple times when:
+        // - File metadata is fragmented across multiple chunks
+        // - Progressive loading triggers re-parsing of file structure
+        // - Corrupt or non-standard MP4 files are being processed
         let readyCallbackFired = false;
 
         mp4boxfile.onReady = (info) => {
