@@ -192,8 +192,24 @@
     
     // Determine base bitrate based on quality level
     if (qualityLevel === 'カスタム') {
-      // Use custom bitrate but still apply codec-specific constraints below
+      // Use custom bitrate directly - user has explicitly set the value
+      // Don't apply codec efficiency or resolution adjustments
       result = isVideo ? customVideoBitrate * 1000 : customAudioBitrate * 1000;
+      
+      // For video, still apply codec-specific constraints and caps
+      if (isVideo) {
+        // Apply maximum video bitrate cap: 50 Mbps
+        const VIDEO_MAX_BITRATE = 50_000_000;
+        if (result > VIDEO_MAX_BITRATE) {
+          result = VIDEO_MAX_BITRATE;
+        }
+      } else {
+        // Audio bitrate handling with codec-specific constraints
+        // (audio codec constraints are applied below)
+      }
+      
+      // Skip codec efficiency and resolution adjustments for custom bitrate
+      // Jump to audio codec constraints section
     } else {
       // Calculate from base rate with quality multiplier
       let multiplier = 1.0;
@@ -205,55 +221,57 @@
         case '最低': multiplier = 0.25; break;
       }
       result = baseRate * multiplier;
-    }
-
-    // Adjust for codec efficiency (video only)
-    if (isVideo) {
-      if (videoCodec.startsWith('vp09')) {
-        result *= 0.7; // VP9 is ~30% more efficient
-      } else if (videoCodec.startsWith('av01')) {
-        result *= 0.6; // AV1 is ~40% more efficient
-      }
-
-      // Adjust for resolution if different from original
-      if (resolutionMode !== 'original') {
-        let targetWidth = originalWidth;
-        let targetHeight = originalHeight;
-        
-        if (resolutionMode === 'preset') {
-          const res = resolutionPresets[resolutionPreset];
-          targetWidth = res.width;
-          targetHeight = res.height;
-        } else if (resolutionMode === 'manual') {
-          targetWidth = manualWidth;
-          targetHeight = manualHeight;
-        } else if (resolutionMode === 'width-only') {
-          targetWidth = widthOnly;
-          targetHeight = Math.round((widthOnly / originalWidth) * originalHeight);
-        } else if (resolutionMode === 'height-only') {
-          targetWidth = Math.round((heightOnly / originalHeight) * originalWidth);
-          targetHeight = heightOnly;
-        }
-        
-        const originalPixels = originalWidth * originalHeight;
-        const targetPixels = targetWidth * targetHeight;
-        const pixelRatio = targetPixels / originalPixels;
-        
-        // Don't increase bitrate when upscaling (pixel ratio > 1)
-        // Upscaling doesn't improve quality, so cap at original bitrate
-        if (pixelRatio <= 1.0) {
-          result *= pixelRatio;
-        }
-        // If upscaling (pixelRatio > 1), keep result as-is (don't scale up)
-      }
       
-      // Apply maximum video bitrate cap: 50 Mbps
-      const VIDEO_MAX_BITRATE = 50_000_000;
-      if (result > VIDEO_MAX_BITRATE) {
-        result = VIDEO_MAX_BITRATE;
+      // Adjust for codec efficiency (video only)
+      if (isVideo) {
+        if (videoCodec.startsWith('vp09')) {
+          result *= 0.7; // VP9 is ~30% more efficient
+        } else if (videoCodec.startsWith('av01')) {
+          result *= 0.6; // AV1 is ~40% more efficient
+        }
+
+        // Adjust for resolution if different from original
+        if (resolutionMode !== 'original') {
+          let targetWidth = originalWidth;
+          let targetHeight = originalHeight;
+          
+          if (resolutionMode === 'preset') {
+            const res = resolutionPresets[resolutionPreset];
+            targetWidth = res.width;
+            targetHeight = res.height;
+          } else if (resolutionMode === 'manual') {
+            targetWidth = manualWidth;
+            targetHeight = manualHeight;
+          } else if (resolutionMode === 'width-only') {
+            targetWidth = widthOnly;
+            targetHeight = Math.round((widthOnly / originalWidth) * originalHeight);
+          } else if (resolutionMode === 'height-only') {
+            targetWidth = Math.round((heightOnly / originalHeight) * originalWidth);
+            targetHeight = heightOnly;
+          }
+          
+          const originalPixels = originalWidth * originalHeight;
+          const targetPixels = targetWidth * targetHeight;
+          const pixelRatio = targetPixels / originalPixels;
+          
+          // Don't increase bitrate when upscaling (pixel ratio > 1)
+          // Upscaling doesn't improve quality, so cap at original bitrate
+          if (pixelRatio <= 1.0) {
+            result *= pixelRatio;
+          }
+          // If upscaling (pixelRatio > 1), keep result as-is (don't scale up)
+        }
+        
+        // Apply maximum video bitrate cap: 50 Mbps
+        const VIDEO_MAX_BITRATE = 50_000_000;
+        if (result > VIDEO_MAX_BITRATE) {
+          result = VIDEO_MAX_BITRATE;
+        }
       }
-    } else {
-      // Audio bitrate handling with codec-specific constraints
+    }
+    
+    // Audio bitrate codec-specific constraints (applied for both custom and calculated)
+    if (!isVideo) {
       
       // Apply audio codec multipliers if needed
       // (none currently, but this is where they would go)
