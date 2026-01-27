@@ -1,4 +1,4 @@
-const CACHE_NAME = 'video-encoder-v1';
+const CACHE_NAME = 'video-encoder-v2';
 const urlsToCache = [
   '/2nd_IT-Project_BrowserVideoEncoding/',
   '/2nd_IT-Project_BrowserVideoEncoding/index.html',
@@ -9,7 +9,9 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log('Opened cache');
-      return cache.addAll(urlsToCache);
+      return cache.addAll(urlsToCache).catch(err => {
+        console.error('Failed to cache:', err);
+      });
     })
   );
   self.skipWaiting();
@@ -32,30 +34,36 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - network first, fallback to cache
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      // Cache hit - return response
-      if (response) {
-        return response;
-      }
-
-      return fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         // Check if valid response
         if (!response || response.status !== 200 || response.type !== 'basic') {
           return response;
         }
 
-        // Clone the response
+        // Clone and cache the response for future use
         const responseToCache = response.clone();
-
         caches.open(CACHE_NAME).then((cache) => {
           cache.put(event.request, responseToCache);
         });
 
         return response;
-      });
-    })
+      })
+      .catch(() => {
+        // Network failed, try cache
+        return caches.match(event.request).then((response) => {
+          if (response) {
+            return response;
+          }
+          // Return a fallback response for navigation requests
+          if (event.request.mode === 'navigate') {
+            return caches.match('/2nd_IT-Project_BrowserVideoEncoding/index.html');
+          }
+          return response;
+        });
+      })
   );
 });
