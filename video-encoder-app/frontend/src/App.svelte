@@ -5,6 +5,7 @@
   import { roundToValidAACBitrate } from './lib/utils/audioUtils.js';
   import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE } from './lib/constants.js';
   import MP4Box from 'mp4box';
+  import ThemeSwitcher from './ThemeSwitcher.svelte';
 
   let file: File | null = null;
   let presets: any[] = [];
@@ -690,17 +691,30 @@
   }
 
   p {
-    color: #666;
+    color: var(--color-textSecondary);
     font-size: 14px;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--color-primary);
+  }
+
+  .header h1 {
+    margin: 0;
   }
 
   .section-title {
     font-size: 16px;
     font-weight: 600;
-    color: #333;
+    color: var(--color-text);
     margin-bottom: 16px;
     padding-bottom: 8px;
-    border-bottom: 2px solid #2979ff;
+    border-bottom: 2px solid var(--color-primary);
   }
 
   .row input[type="number"] {
@@ -755,7 +769,10 @@
 </style>
 
 <div class="container">
-  <h1>ブラウザ動画エンコーダ</h1>
+  <div class="header">
+    <h1>ブラウザ動画エンコーダ</h1>
+    <ThemeSwitcher />
+  </div>
 
   <div class="dropzone" on:click={() => document.getElementById('fileInput')?.click()}>
     <input type="file" id="fileInput" accept="video/mp4" on:change={pickFile} />
