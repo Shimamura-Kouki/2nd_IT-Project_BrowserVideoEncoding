@@ -15,7 +15,7 @@ https://shimamura-kouki.github.io/2nd_IT-Project_BrowserVideoEncoding/
 - バックエンド設計書 → [Implementation_Spec_Backend_Complete.md](Implementation_Spec_Backend_Complete.md)
 
 ### 開発者向け
-- **プログラム実装ガイド** → [video-encoder-app/README.md](video-encoder-app/README.md)
+- **プログラム実装ガイド** → [video-encoder-app/frontend/README.md](video-encoder-app/frontend/README.md)
   - ローカル開発環境のセットアップ
   - 技術スタック詳細
   - アーキテクチャ説明
