@@ -23,8 +23,13 @@ export async function encodeToFile(file, config, onProgress) {
     const fileExtension = container === 'webm' ? '.webm' : (container === 'mov' ? '.mov' : '.mp4');
     const mimeType = container === 'webm' ? 'video/webm' : 'video/mp4';
     
+    // Generate output filename based on original file and bitrate
+    const originalNameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+    const videoBitrateMbps = (config.video.bitrate / 1000000).toFixed(1);
+    const suggestedName = `${originalNameWithoutExt}_${videoBitrateMbps}Mbps${fileExtension}`;
+    
     const handle = await window.showSaveFilePicker({
-        suggestedName: `output${fileExtension}`,
+        suggestedName: suggestedName,
         types: [{ description: 'Video File', accept: { [mimeType]: [fileExtension] } }]
     });
     const fileStream = await handle.createWritable();
@@ -82,14 +87,6 @@ export async function encodeToFile(file, config, onProgress) {
         
         // Pass metadata to the progress callback
         onProgress(undefined, undefined, detectedFormat);
-        
-        // Check for unsupported features and log warnings
-        if (config.video.rotation && config.video.rotation !== 0) {
-            console.warn('Video rotation is not yet implemented and will be ignored.');
-        }
-        if (config.video.flipHorizontal || config.video.flipVertical) {
-            console.warn('Video flipping is not yet implemented and will be ignored.');
-        }
         
         // Determine output framerate
         let outputFramerate = config.video.framerate;
