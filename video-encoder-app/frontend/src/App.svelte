@@ -16,6 +16,8 @@
   let elapsedMs = 0;
   let etaMs = 0;
   let encoding = false;
+  let paused = false;
+  let abortController: AbortController | null = null;
   let message = '';
   let errorLogs: string[] = [];
   let showErrorLogs = false;
@@ -47,6 +49,7 @@
   
   // Bitrate settings - quality-based
   let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム
+  let audioQualityLevel = '中'; // 最高, 高, 中, 低, 最低
   let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム'
   let customAudioBitrate = 128; // in Kbps, used when qualityLevel is 'カスタム'
 
@@ -91,8 +94,8 @@
   $: {
     // Trigger recalculation when any of these change
     const deps = [
-      qualityLevel, customVideoBitrate, customAudioBitrate,
-      videoCodec, audioCodec,
+      qualityLevel, audioQualityLevel, customVideoBitrate, customAudioBitrate,
+      videoCodec, audioCodec, containerFormat,
       resolutionMode, resolutionPreset, manualWidth, manualHeight, widthOnly, heightOnly,
       originalVideoBitrate, originalAudioBitrate, originalWidth, originalHeight,
       sourceFileAnalyzed
@@ -191,27 +194,60 @@
     let result: number;
     
     // Determine base bitrate based on quality level
-    if (qualityLevel === 'カスタム') {
-      // Use custom bitrate directly - user has explicitly set the value
-      // Don't apply codec efficiency or resolution adjustments
-      result = isVideo ? customVideoBitrate * 1000 : customAudioBitrate * 1000;
+    if (qualityLevel === 'カスタム' && isVideo) {
+      // Use custom video bitrate directly - user has explicitly set the value
+      result = customVideoBitrate * 1000;
       
-      // For video, still apply codec-specific constraints and caps
-      if (isVideo) {
-        // Apply maximum video bitrate cap: 50 Mbps
-        const VIDEO_MAX_BITRATE = 50_000_000;
-        if (result > VIDEO_MAX_BITRATE) {
-          result = VIDEO_MAX_BITRATE;
-        }
-      } else {
-        // Audio bitrate handling with codec-specific constraints
-        // (audio codec constraints are applied below)
+      // Apply maximum video bitrate cap: 50 Mbps
+      const VIDEO_MAX_BITRATE = 50_000_000;
+      if (result > VIDEO_MAX_BITRATE) {
+        result = VIDEO_MAX_BITRATE;
       }
       
       // Skip codec efficiency and resolution adjustments for custom bitrate
-      // Jump to audio codec constraints section
+    } else if (!isVideo) {
+      // Audio bitrate calculation based on audioQualityLevel
+      // Use fixed bitrates centered around 128Kbps with 5 levels
+      // For AAC: only 4 valid values [96, 128, 160, 192] Kbps
+      // For Opus: can use 5 levels [64, 96, 128, 160, 192] Kbps
+      
+      let targetBitrate: number;
+      
+      // Determine which codec will be used
+      let effectiveAudioCodec = audioCodec;
+      if (containerFormat === 'mp4') {
+        effectiveAudioCodec = 'mp4a.40.2'; // Always AAC-LC for MP4
+      }
+      
+      if (effectiveAudioCodec === 'opus') {
+        // Opus supports 5 levels
+        switch (audioQualityLevel) {
+          case '最高': targetBitrate = 192_000; break;
+          case '高': targetBitrate = 160_000; break;
+          case '中': targetBitrate = 128_000; break;
+          case '低': targetBitrate = 96_000; break;
+          case '最低': targetBitrate = 64_000; break;
+          default: targetBitrate = 128_000;
+        }
+      } else if (effectiveAudioCodec.startsWith('mp4a')) {
+        // AAC supports only 4 levels: [96, 128, 160, 192] Kbps
+        // Map 5 quality levels to 4 bitrate values
+        switch (audioQualityLevel) {
+          case '最高': targetBitrate = 192_000; break;
+          case '高': targetBitrate = 160_000; break;
+          case '中': targetBitrate = 128_000; break;
+          case '低': targetBitrate = 96_000; break;
+          case '最低': targetBitrate = 96_000; break; // AAC minimum is 96
+          default: targetBitrate = 128_000;
+        }
+      } else {
+        // Fallback to 128 Kbps
+        targetBitrate = 128_000;
+      }
+      
+      result = targetBitrate;
     } else {
-      // Calculate from base rate with quality multiplier
+      // Video bitrate: Calculate from base rate with quality multiplier
       let multiplier = 1.0;
       switch (qualityLevel) {
         case '最高': multiplier = 1.0; break;
@@ -223,50 +259,48 @@
       result = baseRate * multiplier;
       
       // Adjust for codec efficiency (video only)
-      if (isVideo) {
-        if (videoCodec.startsWith('vp09')) {
-          result *= 0.7; // VP9 is ~30% more efficient
-        } else if (videoCodec.startsWith('av01')) {
-          result *= 0.6; // AV1 is ~40% more efficient
-        }
+      if (videoCodec.startsWith('vp09')) {
+        result *= 0.7; // VP9 is ~30% more efficient
+      } else if (videoCodec.startsWith('av01')) {
+        result *= 0.6; // AV1 is ~40% more efficient
+      }
 
-        // Adjust for resolution if different from original
-        if (resolutionMode !== 'original') {
-          let targetWidth = originalWidth;
-          let targetHeight = originalHeight;
-          
-          if (resolutionMode === 'preset') {
-            const res = resolutionPresets[resolutionPreset];
-            targetWidth = res.width;
-            targetHeight = res.height;
-          } else if (resolutionMode === 'manual') {
-            targetWidth = manualWidth;
-            targetHeight = manualHeight;
-          } else if (resolutionMode === 'width-only') {
-            targetWidth = widthOnly;
-            targetHeight = Math.round((widthOnly / originalWidth) * originalHeight);
-          } else if (resolutionMode === 'height-only') {
-            targetWidth = Math.round((heightOnly / originalHeight) * originalWidth);
-            targetHeight = heightOnly;
-          }
-          
-          const originalPixels = originalWidth * originalHeight;
-          const targetPixels = targetWidth * targetHeight;
-          const pixelRatio = targetPixels / originalPixels;
-          
-          // Don't increase bitrate when upscaling (pixel ratio > 1)
-          // Upscaling doesn't improve quality, so cap at original bitrate
-          if (pixelRatio <= 1.0) {
-            result *= pixelRatio;
-          }
-          // If upscaling (pixelRatio > 1), keep result as-is (don't scale up)
+      // Adjust for resolution if different from original
+      if (resolutionMode !== 'original') {
+        let targetWidth = originalWidth;
+        let targetHeight = originalHeight;
+        
+        if (resolutionMode === 'preset') {
+          const res = resolutionPresets[resolutionPreset];
+          targetWidth = res.width;
+          targetHeight = res.height;
+        } else if (resolutionMode === 'manual') {
+          targetWidth = manualWidth;
+          targetHeight = manualHeight;
+        } else if (resolutionMode === 'width-only') {
+          targetWidth = widthOnly;
+          targetHeight = Math.round((widthOnly / originalWidth) * originalHeight);
+        } else if (resolutionMode === 'height-only') {
+          targetWidth = Math.round((heightOnly / originalHeight) * originalWidth);
+          targetHeight = heightOnly;
         }
         
-        // Apply maximum video bitrate cap: 50 Mbps
-        const VIDEO_MAX_BITRATE = 50_000_000;
-        if (result > VIDEO_MAX_BITRATE) {
-          result = VIDEO_MAX_BITRATE;
+        const originalPixels = originalWidth * originalHeight;
+        const targetPixels = targetWidth * targetHeight;
+        const pixelRatio = targetPixels / originalPixels;
+        
+        // Don't increase bitrate when upscaling (pixel ratio > 1)
+        // Upscaling doesn't improve quality, so cap at original bitrate
+        if (pixelRatio <= 1.0) {
+          result *= pixelRatio;
         }
+        // If upscaling (pixelRatio > 1), keep result as-is (don't scale up)
+      }
+      
+      // Apply maximum video bitrate cap: 50 Mbps
+      const VIDEO_MAX_BITRATE = 50_000_000;
+      if (result > VIDEO_MAX_BITRATE) {
+        result = VIDEO_MAX_BITRATE;
       }
     }
     
@@ -364,90 +398,141 @@
     }
   }
 
+  function resetSettings() {
+    // Reset to default values
+    selectedPresetIndex = 0;
+    containerFormat = 'mp4';
+    videoCodec = 'avc1.640028';
+    audioCodec = 'mp4a.40.2';
+    resolutionMode = 'preset';
+    resolutionPreset = '1080p';
+    manualWidth = 1920;
+    manualHeight = 1080;
+    widthOnly = 1920;
+    heightOnly = 1080;
+    framerateMode = 'manual';
+    framerate = 30;
+    qualityLevel = '中';
+    audioQualityLevel = '中';
+    customVideoBitrate = 5000;
+    customAudioBitrate = 128;
+    showDetailedSettings = false;
+    message = '設定をリセットしました';
+  }
+
   async function startEncoding() {
     if (!file) return;
     message = '';
     errorLogs = []; // Clear error logs when starting new encoding
     encoding = true;
+    paused = false;
+    abortController = new AbortController();
     
-    // Note: Audio codec switching is handled by reactive block (lines 67-90)
-    // No need to manually switch here - the reactive block ensures the codec
-    // is already correct based on quality level before encoding starts
+    try {
+      // Note: Audio codec switching is handled by reactive block (lines 67-90)
+      // No need to manually switch here - the reactive block ensures the codec
+      // is already correct based on quality level before encoding starts
 
-    let width: number | undefined;
-    let height: number | undefined;
+      let width: number | undefined;
+      let height: number | undefined;
 
-    if (resolutionMode === 'original') {
-      // Keep original resolution - don't specify width/height
-      width = undefined;
-      height = undefined;
-    } else if (resolutionMode === 'preset') {
-      const res = resolutionPresets[resolutionPreset];
-      width = res.width;
-      height = res.height;
-    } else if (resolutionMode === 'manual') {
-      width = manualWidth;
-      height = manualHeight;
-    } else if (resolutionMode === 'width-only') {
-      width = widthOnly;
-      height = undefined;
-    } else if (resolutionMode === 'height-only') {
-      width = undefined;
-      height = heightOnly;
-    }
-
-    const videoBitrate = calculateBitrate(true);
-    const audioBitrate = calculateBitrate(false);
-
-    const config = {
-      video: { 
-        codec: videoCodec, 
-        container: containerFormat,
-        width: width, 
-        height: height, 
-        bitrate: videoBitrate, 
-        framerate: framerate,
-        framerateMode: framerateMode
-      },
-      audio: { 
-        codec: audioCodec, 
-        sampleRate: 44100, 
-        numberOfChannels: 2, 
-        bitrate: audioBitrate 
+      if (resolutionMode === 'original') {
+        // Keep original resolution - don't specify width/height
+        width = undefined;
+        height = undefined;
+      } else if (resolutionMode === 'preset') {
+        const res = resolutionPresets[resolutionPreset];
+        width = res.width;
+        height = res.height;
+      } else if (resolutionMode === 'manual') {
+        width = manualWidth;
+        height = manualHeight;
+      } else if (resolutionMode === 'width-only') {
+        width = widthOnly;
+        height = undefined;
+      } else if (resolutionMode === 'height-only') {
+        width = undefined;
+        height = heightOnly;
       }
-    };
 
-    const start = performance.now();
-    await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number, etaMs?: number }, metadata?: any) => {
-      if (pct !== undefined) progressPct = pct;
-      if (stats) { 
-        fps = stats.fps; 
-        elapsedMs = stats.elapsedMs;
-        etaMs = stats.etaMs ?? 0;
-      }
-      // Capture source file metadata when available
-      if (metadata && metadata.videoFormat && !sourceFileAnalyzed) {
-        originalWidth = metadata.videoFormat.width || 0;
-        originalHeight = metadata.videoFormat.height || 0;
-        originalFramerate = metadata.videoFormat.framerate || 0;
-        originalVideoBitrate = metadata.videoFormat.bitrate || 0;
-        if (metadata.audioFormat) {
-          originalAudioBitrate = metadata.audioFormat.bitrate || 0;
+      const videoBitrate = calculateBitrate(true);
+      const audioBitrate = calculateBitrate(false);
+
+      const config = {
+        video: { 
+          codec: videoCodec, 
+          container: containerFormat,
+          width: width, 
+          height: height, 
+          bitrate: videoBitrate, 
+          framerate: framerate,
+          framerateMode: framerateMode
+        },
+        audio: { 
+          codec: audioCodec, 
+          sampleRate: 44100, 
+          numberOfChannels: 2, 
+          bitrate: audioBitrate 
         }
-        sourceFileAnalyzed = true;
+      };
+
+      const start = performance.now();
+      await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number, etaMs?: number }, metadata?: any) => {
+        if (pct !== undefined) progressPct = pct;
+        if (stats) { 
+          fps = stats.fps; 
+          elapsedMs = stats.elapsedMs;
+          etaMs = stats.etaMs ?? 0;
+        }
+        // Capture source file metadata when available
+        if (metadata && metadata.videoFormat && !sourceFileAnalyzed) {
+          originalWidth = metadata.videoFormat.width || 0;
+          originalHeight = metadata.videoFormat.height || 0;
+          originalFramerate = metadata.videoFormat.framerate || 0;
+          originalVideoBitrate = metadata.videoFormat.bitrate || 0;
+          if (metadata.audioFormat) {
+            originalAudioBitrate = metadata.audioFormat.bitrate || 0;
+          }
+          sourceFileAnalyzed = true;
+        }
+      }, abortController.signal);
+
+      const end = performance.now();
+      const result = {
+        process_time_ms: Math.round(end - start),
+        source_size_byte: file.size,
+        output_size_byte: 0,
+        avg_fps: fps
+      };
+
+      message = `エンコードが完了しました (処理時間: ${result.process_time_ms}ms, 平均FPS: ${result.avg_fps.toFixed(1)})`;
+    } catch (error: any) {
+      // Handle errors, including AbortError when user cancels file save dialog or stops encoding
+      if (error.name === 'AbortError') {
+        if (abortController?.signal.aborted) {
+          message = 'エンコードが中止されました';
+          console.log('Encoding was stopped by user');
+        } else {
+          message = 'ファイル保存がキャンセルされました';
+          console.log('User cancelled file save dialog');
+        }
+      } else {
+        message = `エラーが発生しました: ${error.message}`;
+        console.error('Encoding error:', error);
       }
-    });
+    } finally {
+      // Always reset encoding state to allow user to retry
+      encoding = false;
+      paused = false;
+      abortController = null;
+    }
+  }
 
-    const end = performance.now();
-    const result = {
-      process_time_ms: Math.round(end - start),
-      source_size_byte: file.size,
-      output_size_byte: 0,
-      avg_fps: fps
-    };
-
-    message = `エンコードが完了しました (処理時間: ${result.process_time_ms}ms, 平均FPS: ${result.avg_fps.toFixed(1)})`;
-    encoding = false;
+  function stopEncoding() {
+    if (abortController) {
+      abortController.abort();
+      message = 'エンコードを中止しています...';
+    }
   }
 
   onMount(() => {
@@ -709,24 +794,40 @@
         <label>コーデック:</label>
         <select bind:value={videoCodec} style="flex: 1;">
           <optgroup label="H.264 (AVC)">
-            <option value="avc1.640028">H.264 High</option>
-            <option value="avc1.4d001f">H.264 Main</option>
-            <option value="avc1.42001f">H.264 Baseline</option>
+            <option value="avc1.640028">H.264 High (最高画質・互換性良)</option>
+            <option value="avc1.4d001f">H.264 Main (高画質・互換性最良)</option>
+            <option value="avc1.42001f">H.264 Baseline (標準画質・旧デバイス対応)</option>
           </optgroup>
           <optgroup label="H.265 (HEVC)">
-            <option value="hev1.1.6.L93.B0">H.265 Main</option>
-            <option value="hvc1.1.6.L93.B0">H.265 Main (hvc1)</option>
+            <option value="hev1.1.6.L93.B0">H.265 Main (高効率・新デバイス)</option>
+            <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 (Apple互換性向上)</option>
           </optgroup>
           <optgroup label="VP9">
-            <option value="vp09.00.31.08">VP9 Profile 0</option>
-            <option value="vp09.00.41.08">VP9 Profile 0 L4.1</option>
+            <option value="vp09.00.31.08">VP9 Profile 0 (WebM標準)</option>
+            <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (高解像度対応)</option>
           </optgroup>
           <optgroup label="AV1">
-            <option value="av01.0.05M.08">AV1 Main L3.1</option>
-            <option value="av01.0.04M.08">AV1 Main L3.0</option>
+            <option value="av01.0.05M.08">AV1 Main L3.1 (最新・高効率)</option>
+            <option value="av01.0.04M.08">AV1 Main L3.0 (標準解像度)</option>
           </optgroup>
         </select>
       </div>
+      
+      <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+        {#if videoCodec.startsWith('avc1.64')}
+          High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能
+        {:else if videoCodec.startsWith('avc1.4d')}
+          Main: バランスの良いH.264プロファイル。互換性が最も高い
+        {:else if videoCodec.startsWith('hev1')}
+          H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要
+        {:else if videoCodec.startsWith('hvc1')}
+          H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上
+        {:else if videoCodec.startsWith('vp09')}
+          VP9: Googleが開発した高効率コーデック。WebMコンテナで使用
+        {:else if videoCodec.startsWith('av01')}
+          AV1: 最新の高効率コーデック。H.264の約30%のサイズで同等画質
+        {/if}
+      </p>
       
       <div class="row">
         <label>ビットレート品質:</label>
@@ -740,6 +841,17 @@
         </select>
       </div>
 
+      <div class="row">
+        <label>音声品質:</label>
+        <select bind:value={audioQualityLevel}>
+          <option value="最高">最高 (192Kbps)</option>
+          <option value="高">高 (160Kbps)</option>
+          <option value="中">中 (128Kbps) - 推奨</option>
+          <option value="低">低 (96Kbps)</option>
+          <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
+        </select>
+      </div>
+
       {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
         <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
           推定ビットレート: 映像 {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps / 音声 {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
@@ -747,6 +859,9 @@
             (VP9コーデックにより最適化)
           {:else if videoCodec.startsWith('av01')}
             (AV1コーデックにより最適化)
+          {/if}
+          {#if audioCodec.startsWith('mp4a')}
+            <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
           {/if}
         </p>
       {/if}
@@ -770,6 +885,16 @@
           style="width: 100%; padding: 10px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;"
         >
           {showDetailedSettings ? '詳細設定を閉じる（設定をリセット）' : '詳細設定を開く'}
+        </button>
+      </div>
+      
+      <div class="row">
+        <button 
+          type="button" 
+          on:click={resetSettings} 
+          style="width: 100%; padding: 10px; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 8px;"
+        >
+          設定をリセット
         </button>
       </div>
     </div>
@@ -894,6 +1019,14 @@
         {#if etaMs > 0 && progressPct < 100}
           <p>推定残り時間: {(etaMs/1000).toFixed(1)}s</p>
         {/if}
+        <div class="row" style="margin-top: 12px;">
+          <button 
+            on:click={stopEncoding} 
+            style="background: #f44336; color: white; width: 100%;"
+          >
+            エンコード中止
+          </button>
+        </div>
       </div>
     {/if}
 

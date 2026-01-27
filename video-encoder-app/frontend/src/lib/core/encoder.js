@@ -12,9 +12,10 @@ const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
  * @param {File} file
  * @param {{ video: { width:number, height:number, bitrate:number, framerate:number, framerateMode?:string, codec:string, container?:string }, audio?: { sampleRate:number, numberOfChannels:number, bitrate:number, codec:string } }} config
  * @param {(pct:number, stats?:{fps:number, elapsedMs:number, etaMs?:number})=>void} onProgress
+ * @param {AbortSignal} [signal] - Optional AbortSignal to cancel encoding
  * @returns {Promise<void>}
  */
-export async function encodeToFile(file, config, onProgress) {
+export async function encodeToFile(file, config, onProgress, signal) {
     // Determine container format from config or codec
     const container = config.video.container || (
         config.video.codec.startsWith('vp') || config.video.codec.startsWith('av01') ? 'webm' : 'mp4'
@@ -33,6 +34,34 @@ export async function encodeToFile(file, config, onProgress) {
         types: [{ description: 'Video File', accept: { [mimeType]: [fileExtension] } }]
     });
     const fileStream = await handle.createWritable();
+
+    // Track abort status
+    let aborted = false;
+    
+    // Cleanup function to handle cancellation
+    const cleanup = async () => {
+        aborted = true;
+        try {
+            // Close encoders
+            if (videoEncoder && videoEncoder.state !== 'closed') {
+                videoEncoder.close();
+            }
+            if (audioEncoder && audioEncoder.state !== 'closed') {
+                audioEncoder.close();
+            }
+            // Close the file stream
+            if (fileStream) {
+                await fileStream.abort();
+            }
+        } catch (e) {
+            console.error('Cleanup error:', e);
+        }
+    };
+    
+    // Set up abort listener if signal is provided
+    if (signal) {
+        signal.addEventListener('abort', cleanup, { once: true });
+    }
 
     let muxer = null;
     let videoEncoder = null;
@@ -318,11 +347,21 @@ export async function encodeToFile(file, config, onProgress) {
 
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
 
+    // Check if aborted after demuxing
+    if (aborted || (signal && signal.aborted)) {
+        throw new DOMException('Encoding was cancelled', 'AbortError');
+    }
+
     // Flush encoders and wait for all output callbacks to complete
     try {
         await videoEncoder.flush();
     } catch (e) {
         console.error('VideoEncoder flush error:', e);
+    }
+    
+    // Check if aborted after video flush
+    if (aborted || (signal && signal.aborted)) {
+        throw new DOMException('Encoding was cancelled', 'AbortError');
     }
     
     if (audioEncoder) {
@@ -333,12 +372,22 @@ export async function encodeToFile(file, config, onProgress) {
         }
     }
     
+    // Check if aborted after audio flush
+    if (aborted || (signal && signal.aborted)) {
+        throw new DOMException('Encoding was cancelled', 'AbortError');
+    }
+    
     // Mark encoding as complete and check if we can finalize
     encodingComplete = true;
     checkIfComplete();
     
     // Wait for all pending chunks to be written to muxer
     await allChunksWrittenPromise;
+    
+    // Check if aborted before finalizing
+    if (aborted || (signal && signal.aborted)) {
+        throw new DOMException('Encoding was cancelled', 'AbortError');
+    }
     
     // Set progress to 100% when encoding is complete
     onProgress(100);
