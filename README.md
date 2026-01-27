@@ -26,6 +26,5 @@ https://shimamura-kouki.github.io/2nd_IT-Project_BrowserVideoEncoding/
 ## 主な機能
 
 - **完全クライアントサイド処理**: 動画データをサーバーに送信せず、ブラウザ内で完結
-- **容量ターゲットエンコード**: Discord (8MB)、Twitter (25MB)などの制限に最適化
 - **高速エンコード**: WebCodecs APIによるハードウェアアクセラレーション活用
 - **大容量対応**: FileSystem Access APIによるストリーム書き込みでメモリ効率化
