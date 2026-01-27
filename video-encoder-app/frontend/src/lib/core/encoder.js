@@ -96,11 +96,18 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let pendingVideoChunks = 0;
     let pendingAudioChunks = 0;
     let encodingComplete = false;
+    let muxerFinalized = false; // Flag to track if muxer has been finalized
     let resolveAllChunksWritten;
     const allChunksWrittenPromise = new Promise(resolve => {
         resolveAllChunksWritten = resolve;
     });
     let completionCheckTimeout = null;
+    
+    // Guard flag to prevent multiple initializations
+    // This prevents the race condition where initializeEncoders is called multiple times
+    // (e.g., if demuxer's onReady callback fires multiple times)
+    // causing multiple muxer instances and encoder reconfigurations
+    let encodersInitialized = false;
 
     /**
      * Check if all chunks have been written to the muxer
@@ -128,6 +135,14 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
+        // Guard against multiple initializations
+        // If mp4boxfile.onReady fires multiple times, we should ignore subsequent calls
+        if (encodersInitialized) {
+            console.warn('initializeEncoders called multiple times - ignoring subsequent call');
+            return;
+        }
+        encodersInitialized = true;
+        
         const { hasAudio, audioFormat, videoFormat, totalFrames: frames } = detectedFormat;
         totalFrames = frames ?? 0; // Store total frames for progress calculation
         
@@ -262,8 +277,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
+                // Increment counter first to ensure proper tracking
                 pendingVideoChunks++;
                 try {
+                    // Ignore chunks that arrive after muxer finalization with a warning
+                    // This can happen with VP9/VP8 encoders which may have delayed callbacks
+                    if (muxerFinalized) {
+                        console.warn('VideoEncoder output callback fired after muxer finalization - ignoring chunk');
+                        return;
+                    }
                     muxer.addVideoChunk(chunk, meta);
                 } finally {
                     pendingVideoChunks--;
@@ -285,8 +307,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
+                    // Increment counter first to ensure proper tracking
                     pendingAudioChunks++;
                     try {
+                        // Ignore chunks that arrive after muxer finalization with a warning
+                        // This can happen with some audio encoders which may have delayed callbacks
+                        if (muxerFinalized) {
+                            console.warn('AudioEncoder output callback fired after muxer finalization - ignoring chunk');
+                            return;
+                        }
                         muxer.addAudioChunk(chunk, meta);
                     } finally {
                         pendingAudioChunks--;
@@ -408,6 +437,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     
     // Set progress to 100% when encoding is complete
     onProgress(100);
+    
+    // Mark muxer as finalized to prevent late encoder callbacks from adding chunks
+    muxerFinalized = true;
     
     // Now safe to finalize - all chunks have been written
     muxer.finalize();
