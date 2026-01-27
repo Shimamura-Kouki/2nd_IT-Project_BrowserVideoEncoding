@@ -96,6 +96,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let pendingVideoChunks = 0;
     let pendingAudioChunks = 0;
     let encodingComplete = false;
+    let muxerFinalized = false; // Flag to track if muxer has been finalized
     let resolveAllChunksWritten;
     const allChunksWrittenPromise = new Promise(resolve => {
         resolveAllChunksWritten = resolve;
@@ -276,6 +277,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
+                // Silently ignore chunks that arrive after muxer finalization
+                // This can happen with VP9/VP8 encoders which may have delayed callbacks
+                if (muxerFinalized) {
+                    console.warn('VideoEncoder output callback fired after muxer finalization - ignoring chunk');
+                    return;
+                }
                 pendingVideoChunks++;
                 try {
                     muxer.addVideoChunk(chunk, meta);
@@ -299,6 +306,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
+                    // Silently ignore chunks that arrive after muxer finalization
+                    // This can happen with some audio encoders which may have delayed callbacks
+                    if (muxerFinalized) {
+                        console.warn('AudioEncoder output callback fired after muxer finalization - ignoring chunk');
+                        return;
+                    }
                     pendingAudioChunks++;
                     try {
                         muxer.addAudioChunk(chunk, meta);
@@ -422,6 +435,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     
     // Set progress to 100% when encoding is complete
     onProgress(100);
+    
+    // Mark muxer as finalized to prevent late encoder callbacks from adding chunks
+    muxerFinalized = true;
     
     // Now safe to finalize - all chunks have been written
     muxer.finalize();
