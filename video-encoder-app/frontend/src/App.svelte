@@ -3,6 +3,7 @@
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
   import { roundToValidAACBitrate } from './lib/utils/audioUtils.js';
+  import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE } from './lib/constants.js';
   import MP4Box from 'mp4box';
 
   let file: File | null = null;
@@ -48,11 +49,6 @@
   let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム
   let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム'
   let customAudioBitrate = 128; // in Kbps, used when qualityLevel is 'カスタム'
-
-  // Optional settings
-  let rotation = 0;
-  let flipHorizontal = false;
-  let flipVertical = false;
 
   // Auto-change container based on video codec selection only (to avoid cycles)
   $: {
@@ -132,6 +128,18 @@
         
         mp4boxfile.onReady = (info: any) => {
           const videoTrack = info.videoTracks?.[0];
+          const audioTrack = info.audioTracks?.[0];
+          
+          // First, determine audio bitrate
+          if (audioTrack) {
+            // Calculate audio bitrate
+            if (audioTrack.bitrate) {
+              originalAudioBitrate = audioTrack.bitrate;
+            } else {
+              originalAudioBitrate = 128000; // default estimate
+            }
+          }
+          
           if (videoTrack) {
             originalWidth = videoTrack.video.width;
             originalHeight = videoTrack.video.height;
@@ -144,17 +152,15 @@
               originalVideoBitrate = videoTrack.bitrate;
             } else if (videoTrack.movie_duration && info.size) {
               const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
-              originalVideoBitrate = Math.round((info.size * 8) / durationSec);
-            }
-          }
-          
-          const audioTrack = info.audioTracks?.[0];
-          if (audioTrack) {
-            // Calculate audio bitrate
-            if (audioTrack.bitrate) {
-              originalAudioBitrate = audioTrack.bitrate;
-            } else {
-              originalAudioBitrate = 128000; // default estimate
+              // Calculate total bitrate from file size
+              const totalBitrate = Math.round((info.size * 8) / durationSec);
+              // Subtract audio bitrate and estimated container overhead
+              const containerOverhead = totalBitrate * CONTAINER_OVERHEAD_PERCENTAGE;
+              originalVideoBitrate = Math.round(totalBitrate - originalAudioBitrate - containerOverhead);
+              // Ensure video bitrate is at least positive
+              if (originalVideoBitrate < MINIMUM_VIDEO_BITRATE) {
+                originalVideoBitrate = MINIMUM_VIDEO_BITRATE;
+              }
             }
           }
           
@@ -186,8 +192,24 @@
     
     // Determine base bitrate based on quality level
     if (qualityLevel === 'カスタム') {
-      // Use custom bitrate but still apply codec-specific constraints below
+      // Use custom bitrate directly - user has explicitly set the value
+      // Don't apply codec efficiency or resolution adjustments
       result = isVideo ? customVideoBitrate * 1000 : customAudioBitrate * 1000;
+      
+      // For video, still apply codec-specific constraints and caps
+      if (isVideo) {
+        // Apply maximum video bitrate cap: 50 Mbps
+        const VIDEO_MAX_BITRATE = 50_000_000;
+        if (result > VIDEO_MAX_BITRATE) {
+          result = VIDEO_MAX_BITRATE;
+        }
+      } else {
+        // Audio bitrate handling with codec-specific constraints
+        // (audio codec constraints are applied below)
+      }
+      
+      // Skip codec efficiency and resolution adjustments for custom bitrate
+      // Jump to audio codec constraints section
     } else {
       // Calculate from base rate with quality multiplier
       let multiplier = 1.0;
@@ -199,49 +221,57 @@
         case '最低': multiplier = 0.25; break;
       }
       result = baseRate * multiplier;
-    }
+      
+      // Adjust for codec efficiency (video only)
+      if (isVideo) {
+        if (videoCodec.startsWith('vp09')) {
+          result *= 0.7; // VP9 is ~30% more efficient
+        } else if (videoCodec.startsWith('av01')) {
+          result *= 0.6; // AV1 is ~40% more efficient
+        }
 
-    // Adjust for codec efficiency (video only)
-    if (isVideo) {
-      if (videoCodec.startsWith('vp09')) {
-        result *= 0.7; // VP9 is ~30% more efficient
-      } else if (videoCodec.startsWith('av01')) {
-        result *= 0.6; // AV1 is ~40% more efficient
-      }
-
-      // Adjust for resolution if different from original
-      if (resolutionMode !== 'original') {
-        let targetWidth = originalWidth;
-        let targetHeight = originalHeight;
-        
-        if (resolutionMode === 'preset') {
-          const res = resolutionPresets[resolutionPreset];
-          targetWidth = res.width;
-          targetHeight = res.height;
-        } else if (resolutionMode === 'manual') {
-          targetWidth = manualWidth;
-          targetHeight = manualHeight;
-        } else if (resolutionMode === 'width-only') {
-          targetWidth = widthOnly;
-          targetHeight = Math.round((widthOnly / originalWidth) * originalHeight);
-        } else if (resolutionMode === 'height-only') {
-          targetWidth = Math.round((heightOnly / originalHeight) * originalWidth);
-          targetHeight = heightOnly;
+        // Adjust for resolution if different from original
+        if (resolutionMode !== 'original') {
+          let targetWidth = originalWidth;
+          let targetHeight = originalHeight;
+          
+          if (resolutionMode === 'preset') {
+            const res = resolutionPresets[resolutionPreset];
+            targetWidth = res.width;
+            targetHeight = res.height;
+          } else if (resolutionMode === 'manual') {
+            targetWidth = manualWidth;
+            targetHeight = manualHeight;
+          } else if (resolutionMode === 'width-only') {
+            targetWidth = widthOnly;
+            targetHeight = Math.round((widthOnly / originalWidth) * originalHeight);
+          } else if (resolutionMode === 'height-only') {
+            targetWidth = Math.round((heightOnly / originalHeight) * originalWidth);
+            targetHeight = heightOnly;
+          }
+          
+          const originalPixels = originalWidth * originalHeight;
+          const targetPixels = targetWidth * targetHeight;
+          const pixelRatio = targetPixels / originalPixels;
+          
+          // Don't increase bitrate when upscaling (pixel ratio > 1)
+          // Upscaling doesn't improve quality, so cap at original bitrate
+          if (pixelRatio <= 1.0) {
+            result *= pixelRatio;
+          }
+          // If upscaling (pixelRatio > 1), keep result as-is (don't scale up)
         }
         
-        const originalPixels = originalWidth * originalHeight;
-        const targetPixels = targetWidth * targetHeight;
-        const pixelRatio = targetPixels / originalPixels;
-        result *= pixelRatio;
+        // Apply maximum video bitrate cap: 50 Mbps
+        const VIDEO_MAX_BITRATE = 50_000_000;
+        if (result > VIDEO_MAX_BITRATE) {
+          result = VIDEO_MAX_BITRATE;
+        }
       }
-      
-      // Apply maximum video bitrate cap: 50 Mbps
-      const VIDEO_MAX_BITRATE = 50_000_000;
-      if (result > VIDEO_MAX_BITRATE) {
-        result = VIDEO_MAX_BITRATE;
-      }
-    } else {
-      // Audio bitrate handling with codec-specific constraints
+    }
+    
+    // Audio bitrate codec-specific constraints (applied for both custom and calculated)
+    if (!isVideo) {
       
       // Apply audio codec multipliers if needed
       // (none currently, but this is where they would go)
@@ -377,10 +407,7 @@
         height: height, 
         bitrate: videoBitrate, 
         framerate: framerate,
-        framerateMode: framerateMode,
-        rotation: rotation,
-        flipHorizontal: flipHorizontal,
-        flipVertical: flipVertical
+        framerateMode: framerateMode
       },
       audio: { 
         codec: audioCodec, 
@@ -589,24 +616,6 @@
     margin-bottom: 16px;
     padding-bottom: 8px;
     border-bottom: 2px solid #2979ff;
-  }
-
-  .checkbox-group {
-    display: flex;
-    gap: 24px;
-    align-items: center;
-  }
-
-  .checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-  }
-
-  .checkbox-label input[type="checkbox"] {
-    width: auto;
-    min-width: auto;
   }
 
   .row input[type="number"] {
@@ -870,38 +879,6 @@
             <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ フレームレートを元ファイル({originalFramerate.toFixed(1)}fps)より高く設定しても品質は向上しません</p>
           {/if}
         {/if}
-      </div>
-
-      <!-- Optional Settings -->
-      <div class="panel">
-        <h3 class="section-title">任意設定</h3>
-        <p style="color: #ff9800; background: #fff3e0; padding: 8px; border-radius: 4px; font-size: 12px; margin-bottom: 16px;">
-          ⚠️ 回転と反転機能は現在開発中のため、設定しても適用されません
-        </p>
-        
-        <div class="row">
-          <label>映像の回転:</label>
-          <select bind:value={rotation}>
-            <option value={0}>0度</option>
-            <option value={90}>90度</option>
-            <option value={180}>180度</option>
-            <option value={270}>270度</option>
-          </select>
-        </div>
-
-        <div class="row">
-          <label>映像の反転:</label>
-          <div class="checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" bind:checked={flipHorizontal} />
-              <span>左右反転</span>
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" bind:checked={flipVertical} />
-              <span>上下反転</span>
-            </label>
-          </div>
-        </div>
       </div>
     {/if}
 

@@ -1,4 +1,5 @@
 import MP4Box from 'mp4box';
+import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE } from '../constants.js';
 
 // Progress contribution: demuxing contributes 10% of total progress, encoding 90%
 const DEMUX_PROGRESS_PERCENTAGE = 10;
@@ -23,7 +24,36 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
 
         mp4boxfile.onReady = (info) => {
             const videoTrack = info.videoTracks?.[0];
+            const audioTrack = info.audioTracks?.[0];
             let detectedVideoFormat = null;
+            
+            // First, determine audio bitrate to use in video bitrate calculation
+            let audioBitrate = null;
+            if (audioTrack && audioDecoder) {
+                hasAudio = true;
+                audioTrackId = audioTrack.id;
+                
+                // Calculate audio bitrate
+                if (audioTrack.bitrate) {
+                    audioBitrate = audioTrack.bitrate;
+                } else {
+                    // Rough estimate for common audio formats when bitrate is not available
+                    audioBitrate = 128000; // default estimate
+                }
+                
+                detectedAudioFormat = {
+                    sampleRate: audioTrack.audio.sample_rate,
+                    numberOfChannels: audioTrack.audio.channel_count,
+                    bitrate: audioBitrate
+                };
+                audioDecoder.configure({
+                    codec: audioTrack.codec,
+                    sampleRate: audioTrack.audio.sample_rate,
+                    numberOfChannels: audioTrack.audio.channel_count
+                });
+                mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
+            }
+            
             if (videoTrack) {
                 videoTrackId = videoTrack.id;
                 // Calculate total frames from track info
@@ -34,9 +64,17 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 if (videoTrack.bitrate) {
                     videoBitrate = videoTrack.bitrate;
                 } else if (videoTrack.movie_duration && info.size) {
-                    // Estimate from file size and duration (rough approximation)
+                    // Estimate from file size and duration
                     const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
-                    videoBitrate = Math.round((info.size * 8) / durationSec);
+                    const totalBitrate = Math.round((info.size * 8) / durationSec);
+                    // Subtract audio bitrate and estimated container overhead
+                    const containerOverhead = totalBitrate * CONTAINER_OVERHEAD_PERCENTAGE;
+                    const estimatedAudioBitrate = audioBitrate || 0;
+                    videoBitrate = Math.round(totalBitrate - estimatedAudioBitrate - containerOverhead);
+                    // Ensure video bitrate is at least positive
+                    if (videoBitrate < MINIMUM_VIDEO_BITRATE) {
+                        videoBitrate = MINIMUM_VIDEO_BITRATE;
+                    }
                 }
                 
                 detectedVideoFormat = {
@@ -57,33 +95,6 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                     description
                 });
                 mp4boxfile.setExtractionOptions(videoTrackId, 'video', { nbSamples: 100 });
-            }
-
-            const audioTrack = info.audioTracks?.[0];
-            if (audioTrack && audioDecoder) {
-                hasAudio = true;
-                audioTrackId = audioTrack.id;
-                
-                // Calculate audio bitrate
-                let audioBitrate = null;
-                if (audioTrack.bitrate) {
-                    audioBitrate = audioTrack.bitrate;
-                } else if (audioTrack.audio.sample_rate && audioTrack.audio.channel_count) {
-                    // Rough estimate for common audio formats
-                    audioBitrate = 128000; // default estimate
-                }
-                
-                detectedAudioFormat = {
-                    sampleRate: audioTrack.audio.sample_rate,
-                    numberOfChannels: audioTrack.audio.channel_count,
-                    bitrate: audioBitrate
-                };
-                audioDecoder.configure({
-                    codec: audioTrack.codec,
-                    sampleRate: audioTrack.audio.sample_rate,
-                    numberOfChannels: audioTrack.audio.channel_count
-                });
-                mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
             }
 
             // Call the onReady callback to initialize encoders and muxer with detected format
