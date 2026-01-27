@@ -137,23 +137,18 @@ frontend/
 - X (Twitter) / Gmail: 25MB
 - カスタムサイズ指定
 
-### 3. ベンチマーク機能
-- エンコード時間の計測
-- 平均FPS計算
-- 圧縮率表示
-
-### 4. ストリーム保存
+### 3. ストリーム保存
 `FileSystem Access API`を使用し、大容量動画でもメモリを圧迫せずに保存可能。
 
 ## 主な実装
 
 - `src/lib/core/demuxer.js`: mp4box.jsで入力をデマックスし、デコーダへ供給
 - `src/lib/core/encoder.js`: WebCodecsで再エンコードし、mp4-muxer経由で FileSystem API へストリーム保存
-- `src/App.svelte`: UIと進捗表示、共有API呼び出し
+- `src/App.svelte`: UIと進捗表示
 
 ## 環境変数
 
-- `VITE_API_BASE` (任意): APIのベースURL。未指定時は `/api/` を使用
+現在、環境変数の設定は不要です。
 
 ## 開発ガイド
 
@@ -179,7 +174,6 @@ WebCodecs APIとFileSystem Access APIは**セキュアコンテキスト**での
 
 1. **ブラウザの開発者ツールを活用**
    - Console: エラーログの確認
-   - Network: API通信の監視（ナレッジ共有機能使用時）
    - Performance: パフォーマンスボトルネックの特定
 
 2. **WebCodecsのサポート確認**
@@ -217,7 +211,7 @@ A: ブラウザのサポート状況を確認してください。ChromeやEdge�
 - [FileSystem Access API - MDN](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API)
 - [mp4-muxer - GitHub](https://github.com/Vanilagy/mp4-muxer)
 - [mp4box.js - GitHub](https://github.com/gpac/mp4box.js/)
-- [フロントエンド実装完全ガイド](../../Implementation_Spec_Frontend_Complete_v3.md)
+- [フロントエンド実装完全ガイド（設計当初の資料）](../../Implementation_Spec_Frontend_Complete_v3.md)
 
 ## ライセンス
 

@@ -9,10 +9,12 @@ https://shimamura-kouki.github.io/2nd_IT-Project_BrowserVideoEncoding/
 
 ## 📚 ドキュメント
 
-### プロジェクト資料
+### プロジェクト資料（設計当初の情報）
 - 企画書 → [企画書mk3-α.md](企画書mk3-α.md)
 - フロントエンド設計書 → [Implementation_Spec_Frontend_Complete_v3.md](Implementation_Spec_Frontend_Complete_v3.md)
 - バックエンド設計書 → [Implementation_Spec_Backend_Complete.md](Implementation_Spec_Backend_Complete.md)
+
+**注**: 上記の設計書は開発初期段階で作成されたものです。実際の実装内容については、プログラム実装ガイドを参照してください。
 
 ### 開発者向け
 - **プログラム実装ガイド** → [video-encoder-app/frontend/README.md](video-encoder-app/frontend/README.md)
@@ -27,4 +29,3 @@ https://shimamura-kouki.github.io/2nd_IT-Project_BrowserVideoEncoding/
 - **容量ターゲットエンコード**: Discord (8MB)、Twitter (25MB)などの制限に最適化
 - **高速エンコード**: WebCodecs APIによるハードウェアアクセラレーション活用
 - **大容量対応**: FileSystem Access APIによるストリーム書き込みでメモリ効率化
-- **ベンチマーク機能**: エンコード性能の自動計測と共有
