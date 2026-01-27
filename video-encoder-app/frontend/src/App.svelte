@@ -841,16 +841,18 @@
         </select>
       </div>
 
-      <div class="row">
-        <label>音声品質:</label>
-        <select bind:value={audioQualityLevel}>
-          <option value="最高">最高 (192Kbps)</option>
-          <option value="高">高 (160Kbps)</option>
-          <option value="中">中 (128Kbps) - 推奨</option>
-          <option value="低">低 (96Kbps)</option>
-          <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
-        </select>
-      </div>
+      {#if qualityLevel !== 'カスタム'}
+        <div class="row">
+          <label>音声品質:</label>
+          <select bind:value={audioQualityLevel}>
+            <option value="最高">最高 (192Kbps)</option>
+            <option value="高">高 (160Kbps)</option>
+            <option value="中">中 (128Kbps) - 推奨</option>
+            <option value="低">低 (96Kbps)</option>
+            <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
+          </select>
+        </div>
+      {/if}
 
       {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
         <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
