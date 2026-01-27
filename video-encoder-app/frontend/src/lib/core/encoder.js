@@ -277,7 +277,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
-                // Silently ignore chunks that arrive after muxer finalization
+                // Ignore chunks that arrive after muxer finalization with a warning
                 // This can happen with VP9/VP8 encoders which may have delayed callbacks
                 if (muxerFinalized) {
                     console.warn('VideoEncoder output callback fired after muxer finalization - ignoring chunk');
@@ -306,7 +306,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
-                    // Silently ignore chunks that arrive after muxer finalization
+                    // Ignore chunks that arrive after muxer finalization with a warning
                     // This can happen with some audio encoders which may have delayed callbacks
                     if (muxerFinalized) {
                         console.warn('AudioEncoder output callback fired after muxer finalization - ignoring chunk');
