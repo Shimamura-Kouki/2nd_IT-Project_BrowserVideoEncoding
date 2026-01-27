@@ -35,6 +35,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
     });
     const fileStream = await handle.createWritable();
 
+    let muxer = null;
+    let videoEncoder = null;
+    let audioEncoder = null;
+    
     // Track abort status
     let aborted = false;
     
@@ -42,16 +46,32 @@ export async function encodeToFile(file, config, onProgress, signal) {
     const cleanup = async () => {
         aborted = true;
         try {
-            // Close encoders
-            if (videoEncoder && videoEncoder.state !== 'closed') {
-                videoEncoder.close();
+            // Close encoders - check both existence and state
+            if (videoEncoder) {
+                try {
+                    if (videoEncoder.state === 'configured' || videoEncoder.state === 'unconfigured') {
+                        videoEncoder.close();
+                    }
+                } catch (e) {
+                    console.error('Error closing video encoder:', e);
+                }
             }
-            if (audioEncoder && audioEncoder.state !== 'closed') {
-                audioEncoder.close();
+            if (audioEncoder) {
+                try {
+                    if (audioEncoder.state === 'configured' || audioEncoder.state === 'unconfigured') {
+                        audioEncoder.close();
+                    }
+                } catch (e) {
+                    console.error('Error closing audio encoder:', e);
+                }
             }
             // Close the file stream
             if (fileStream) {
-                await fileStream.abort();
+                try {
+                    await fileStream.abort();
+                } catch (e) {
+                    console.error('Error aborting file stream:', e);
+                }
             }
         } catch (e) {
             console.error('Cleanup error:', e);
@@ -63,9 +83,6 @@ export async function encodeToFile(file, config, onProgress, signal) {
         signal.addEventListener('abort', cleanup, { once: true });
     }
 
-    let muxer = null;
-    let videoEncoder = null;
-    let audioEncoder = null;
     let frameCount = 0;
     let totalFrames = 0; // Total frames to encode
     const start = performance.now();
