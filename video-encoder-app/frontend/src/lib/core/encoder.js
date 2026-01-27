@@ -101,6 +101,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
         resolveAllChunksWritten = resolve;
     });
     let completionCheckTimeout = null;
+    
+    // Guard flag to prevent multiple initializations
+    // This prevents the race condition where mp4boxfile.onReady fires multiple times
+    // causing multiple muxer instances and encoder reconfigurations
+    let encodersInitialized = false;
 
     /**
      * Check if all chunks have been written to the muxer
@@ -128,6 +133,14 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
+        // Guard against multiple initializations
+        // If mp4boxfile.onReady fires multiple times, we should ignore subsequent calls
+        if (encodersInitialized) {
+            console.warn('initializeEncoders called multiple times - ignoring subsequent call');
+            return;
+        }
+        encodersInitialized = true;
+        
         const { hasAudio, audioFormat, videoFormat, totalFrames: frames } = detectedFormat;
         totalFrames = frames ?? 0; // Store total frames for progress calculation
         
