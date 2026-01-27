@@ -12,9 +12,10 @@ const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
  * @param {File} file
  * @param {{ video: { width:number, height:number, bitrate:number, framerate:number, framerateMode?:string, codec:string, container?:string }, audio?: { sampleRate:number, numberOfChannels:number, bitrate:number, codec:string } }} config
  * @param {(pct:number, stats?:{fps:number, elapsedMs:number, etaMs?:number})=>void} onProgress
+ * @param {AbortSignal} [signal] - Optional AbortSignal to cancel encoding
  * @returns {Promise<void>}
  */
-export async function encodeToFile(file, config, onProgress) {
+export async function encodeToFile(file, config, onProgress, signal) {
     // Determine container format from config or codec
     const container = config.video.container || (
         config.video.codec.startsWith('vp') || config.video.codec.startsWith('av01') ? 'webm' : 'mp4'
@@ -37,6 +38,51 @@ export async function encodeToFile(file, config, onProgress) {
     let muxer = null;
     let videoEncoder = null;
     let audioEncoder = null;
+    
+    // Track abort status
+    let aborted = false;
+    
+    // Cleanup function to handle cancellation
+    const cleanup = async () => {
+        aborted = true;
+        try {
+            // Close encoders - check both existence and state
+            if (videoEncoder) {
+                try {
+                    if (videoEncoder.state === 'configured' || videoEncoder.state === 'unconfigured') {
+                        videoEncoder.close();
+                    }
+                } catch (e) {
+                    console.error('Error closing video encoder:', e);
+                }
+            }
+            if (audioEncoder) {
+                try {
+                    if (audioEncoder.state === 'configured' || audioEncoder.state === 'unconfigured') {
+                        audioEncoder.close();
+                    }
+                } catch (e) {
+                    console.error('Error closing audio encoder:', e);
+                }
+            }
+            // Close the file stream
+            if (fileStream) {
+                try {
+                    await fileStream.abort();
+                } catch (e) {
+                    console.error('Error aborting file stream:', e);
+                }
+            }
+        } catch (e) {
+            console.error('Cleanup error:', e);
+        }
+    };
+    
+    // Set up abort listener if signal is provided
+    if (signal) {
+        signal.addEventListener('abort', cleanup, { once: true });
+    }
+
     let frameCount = 0;
     let totalFrames = 0; // Total frames to encode
     const start = performance.now();
@@ -318,11 +364,21 @@ export async function encodeToFile(file, config, onProgress) {
 
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
 
+    // Check if aborted after demuxing
+    if (aborted || (signal && signal.aborted)) {
+        throw new DOMException('Encoding was cancelled', 'AbortError');
+    }
+
     // Flush encoders and wait for all output callbacks to complete
     try {
         await videoEncoder.flush();
     } catch (e) {
         console.error('VideoEncoder flush error:', e);
+    }
+    
+    // Check if aborted after video flush
+    if (aborted || (signal && signal.aborted)) {
+        throw new DOMException('Encoding was cancelled', 'AbortError');
     }
     
     if (audioEncoder) {
@@ -333,12 +389,22 @@ export async function encodeToFile(file, config, onProgress) {
         }
     }
     
+    // Check if aborted after audio flush
+    if (aborted || (signal && signal.aborted)) {
+        throw new DOMException('Encoding was cancelled', 'AbortError');
+    }
+    
     // Mark encoding as complete and check if we can finalize
     encodingComplete = true;
     checkIfComplete();
     
     // Wait for all pending chunks to be written to muxer
     await allChunksWrittenPromise;
+    
+    // Check if aborted before finalizing
+    if (aborted || (signal && signal.aborted)) {
+        throw new DOMException('Encoding was cancelled', 'AbortError');
+    }
     
     // Set progress to 100% when encoding is complete
     onProgress(100);
