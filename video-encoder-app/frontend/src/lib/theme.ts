@@ -86,25 +86,42 @@ export const themes: Record<string, Theme> = {
 
 const THEME_STORAGE_KEY = 'video-encoder-theme';
 
+function getSystemTheme(): 'light' | 'dark' {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return 'light';
+}
+
 function getInitialTheme(): string {
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored && themes[stored]) {
-      return stored;
-    }
-    // Check system preference
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark';
+    if (stored) {
+      // If 'auto' is stored, resolve to system theme
+      if (stored === 'auto') {
+        return 'auto';
+      }
+      // If a specific theme is stored and exists, use it
+      if (themes[stored]) {
+        return stored;
+      }
     }
   }
-  return 'light';
+  // Default to auto mode
+  return 'auto';
 }
 
 export const currentTheme = writable<string>(getInitialTheme());
 
 // Apply theme to document
 export function applyTheme(themeName: string) {
-  const theme = themes[themeName];
+  // Resolve 'auto' to actual system theme
+  let actualTheme = themeName;
+  if (themeName === 'auto') {
+    actualTheme = getSystemTheme();
+  }
+  
+  const theme = themes[actualTheme];
   if (!theme) return;
 
   const root = document.documentElement;
@@ -112,9 +129,21 @@ export function applyTheme(themeName: string) {
     root.style.setProperty(`--color-${key}`, value);
   });
 
-  // Save to localStorage
+  // Save user preference to localStorage (keep 'auto' if that's what was selected)
   localStorage.setItem(THEME_STORAGE_KEY, themeName);
   currentTheme.set(themeName);
+}
+
+// Listen for system theme changes
+if (typeof window !== 'undefined' && window.matchMedia) {
+  const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  darkModeQuery.addEventListener('change', () => {
+    // Only auto-update if user has selected 'auto' mode
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (!stored || stored === 'auto') {
+      applyTheme('auto');
+    }
+  });
 }
 
 // Initialize theme on load

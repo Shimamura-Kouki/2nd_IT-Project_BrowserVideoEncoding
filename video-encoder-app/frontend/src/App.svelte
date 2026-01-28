@@ -771,6 +771,30 @@
     color: var(--color-error);
   }
 
+  .footer {
+    margin-top: 32px;
+    padding: 20px 0;
+    border-top: 1px solid var(--color-border);
+    text-align: center;
+    color: var(--color-textSecondary);
+    font-size: 14px;
+  }
+
+  .footer p {
+    margin: 0;
+  }
+
+  .footer a {
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  .footer a:hover {
+    opacity: 0.7;
+    text-decoration: underline;
+  }
+
 </style>
 
 <div class="container">
@@ -818,7 +842,8 @@
           <optgroup label="H.264 (AVC)">
             <option value="avc1.640028">H.264 High (最高画質・互換性良)</option>
             <option value="avc1.4d001f">H.264 Main (高画質・互換性最良)</option>
-            <option value="avc1.42001f">H.264 Baseline (標準画質・旧デバイス対応)</option>
+            <option value="avc1.42001f">H.264 Baseline L3.1 (標準画質・旧デバイス対応)</option>
+            <option value="avc1.42001e">H.264 Baseline L3.0 (低解像度・最高互換性)</option>
           </optgroup>
           <optgroup label="H.265 (HEVC)">
             <option value="hev1.1.6.L93.B0">H.265 Main (高効率・新デバイス)</option>
@@ -840,6 +865,10 @@
           High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能
         {:else if videoCodec.startsWith('avc1.4d')}
           Main: バランスの良いH.264プロファイル。互換性が最も高い
+        {:else if videoCodec === 'avc1.42001f'}
+          Baseline L3.1: 標準画質のH.264。旧デバイスとの互換性重視
+        {:else if videoCodec === 'avc1.42001e'}
+          Baseline L3.0: 低解像度向けH.264。最高の互換性
         {:else if videoCodec.startsWith('hev1')}
           H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要
         {:else if videoCodec.startsWith('hvc1')}
@@ -1082,5 +1111,14 @@
       <p style="color: #999;">プリセットを読み込み中...</p>
     </div>
   {/if}
+  
+  <footer class="footer">
+    <p>
+      © 2024 Browser Video Encoder | 
+      <a href="https://github.com/Shimamura-Kouki/2nd_IT-Project_BrowserVideoEncoding" target="_blank" rel="noopener noreferrer">
+        GitHub Repository
+      </a>
+    </p>
+  </footer>
 </div>
 
