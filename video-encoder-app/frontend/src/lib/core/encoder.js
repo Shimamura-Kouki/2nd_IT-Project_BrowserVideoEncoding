@@ -112,9 +112,6 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let totalFrames = 0; // Total frames to encode
     const start = performance.now();
     
-    // Timeout delay to ensure all encoder output callbacks complete before finalization
-    const COMPLETION_CHECK_DELAY_MS = 100;
-    
     // Track pending chunks to ensure all are written before finalization
     // This prevents the race condition where muxer.finalize() is called
     // while encoder output callbacks are still adding chunks
@@ -122,41 +119,18 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let pendingAudioChunks = 0;
     let encodingComplete = false;
     let muxerFinalized = false; // Flag to track if muxer has been finalized
-    let resolveAllChunksWritten;
-    const allChunksWrittenPromise = new Promise(resolve => {
-        resolveAllChunksWritten = resolve;
-    });
-    let completionCheckTimeout = null;
+    
+    // Track when chunks last arrived to detect when encoding is truly complete
+    let lastVideoChunkTime = 0;
+    let lastAudioChunkTime = 0;
+    let totalVideoChunksReceived = 0;
+    let totalAudioChunksReceived = 0;
     
     // Guard flag to prevent multiple initializations
     // This prevents the race condition where initializeEncoders is called multiple times
     // (e.g., if demuxer's onReady callback fires multiple times)
     // causing multiple muxer instances and encoder reconfigurations
     let encodersInitialized = false;
-
-    /**
-     * Check if all chunks have been written to the muxer
-     * Resolves the allChunksWrittenPromise when:
-     * - Encoding is marked complete (after encoder flush)
-     * - No pending video chunks
-     * - No pending audio chunks
-     * - A brief delay has passed to ensure no more chunks are coming
-     */
-    const checkIfComplete = () => {
-        if (encodingComplete && pendingVideoChunks === 0 && pendingAudioChunks === 0) {
-            // Clear any existing timeout
-            if (completionCheckTimeout) {
-                clearTimeout(completionCheckTimeout);
-            }
-            // Wait a brief moment to ensure no more chunks are coming from the encoder
-            completionCheckTimeout = setTimeout(() => {
-                // Double-check the counters after the delay
-                if (pendingVideoChunks === 0 && pendingAudioChunks === 0) {
-                    resolveAllChunksWritten();
-                }
-            }, COMPLETION_CHECK_DELAY_MS);
-        }
-    };
 
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
@@ -304,17 +278,19 @@ export async function encodeToFile(file, config, onProgress, signal) {
             output: (chunk, meta) => {
                 // Increment counter first to ensure proper tracking
                 pendingVideoChunks++;
+                totalVideoChunksReceived++;
+                lastVideoChunkTime = performance.now();
+                
                 try {
                     // Ignore chunks that arrive after muxer finalization with a warning
                     // This can happen with VP9/VP8 encoders which may have delayed callbacks
                     if (muxerFinalized) {
-                        console.warn('VideoEncoder output callback fired after muxer finalization - ignoring chunk');
+                        console.warn(`VideoEncoder output callback fired after muxer finalization - ignoring chunk ${totalVideoChunksReceived}`);
                         return;
                     }
                     muxer.addVideoChunk(chunk, meta);
                 } finally {
                     pendingVideoChunks--;
-                    checkIfComplete();
                 }
             },
             error: (e) => console.error('VideoEncoder error', e)
@@ -334,17 +310,19 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 output: (chunk, meta) => {
                     // Increment counter first to ensure proper tracking
                     pendingAudioChunks++;
+                    totalAudioChunksReceived++;
+                    lastAudioChunkTime = performance.now();
+                    
                     try {
                         // Ignore chunks that arrive after muxer finalization with a warning
                         // This can happen with some audio encoders which may have delayed callbacks
                         if (muxerFinalized) {
-                            console.warn('AudioEncoder output callback fired after muxer finalization - ignoring chunk');
+                            console.warn(`AudioEncoder output callback fired after muxer finalization - ignoring chunk ${totalAudioChunksReceived}`);
                             return;
                         }
                         muxer.addAudioChunk(chunk, meta);
                     } finally {
                         pendingAudioChunks--;
-                        checkIfComplete();
                     }
                 },
                 error: (e) => console.error('AudioEncoder error', e)
@@ -448,29 +426,72 @@ export async function encodeToFile(file, config, onProgress, signal) {
         throw new DOMException('Encoding was cancelled', 'AbortError');
     }
     
-    // Mark encoding as complete and check if we can finalize
+    // Mark encoding as complete
     encodingComplete = true;
-    checkIfComplete();
     
-    // Wait for all pending chunks to be written to muxer
-    await allChunksWrittenPromise;
+    // Wait until no new chunks have arrived for a sustained period
+    // This is critical for VP9/VP8 encoders which continue to fire callbacks after flush()
+    const CHUNK_IDLE_TIMEOUT_MS = 300; // Wait 300ms of no new chunks before considering done
+    const MAX_WAIT_MS = 5000; // Maximum time to wait (safety timeout)
+    const POLL_INTERVAL_MS = 50; // Check every 50ms
     
-    // Check if aborted before finalizing
-    if (aborted || (signal && signal.aborted)) {
-        throw new DOMException('Encoding was cancelled', 'AbortError');
+    console.log('Waiting for all encoder chunks to complete...');
+    console.log(`Initial state: video chunks received=${totalVideoChunksReceived}, audio chunks received=${totalAudioChunksReceived}`);
+    
+    const waitStartTime = performance.now();
+    let lastCheckTime = waitStartTime;
+    let lastTotalVideoChunks = totalVideoChunksReceived;
+    let lastTotalAudioChunks = totalAudioChunksReceived;
+    
+    // Poll until no new chunks arrive for CHUNK_IDLE_TIMEOUT_MS
+    while (true) {
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+        
+        // Check if aborted during wait
+        if (aborted || (signal && signal.aborted)) {
+            throw new DOMException('Encoding was cancelled', 'AbortError');
+        }
+        
+        const now = performance.now();
+        const elapsedTotal = now - waitStartTime;
+        
+        // Safety timeout - prevent infinite waiting
+        if (elapsedTotal > MAX_WAIT_MS) {
+            console.warn(`Reached maximum wait time (${MAX_WAIT_MS}ms), proceeding with finalization`);
+            console.warn(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}, pending video=${pendingVideoChunks}, pending audio=${pendingAudioChunks}`);
+            break;
+        }
+        
+        // Check if new chunks arrived since last check
+        if (totalVideoChunksReceived > lastTotalVideoChunks || totalAudioChunksReceived > lastTotalAudioChunks) {
+            // New chunks arrived, reset the idle timer
+            lastCheckTime = now;
+            lastTotalVideoChunks = totalVideoChunksReceived;
+            lastTotalAudioChunks = totalAudioChunksReceived;
+            console.log(`New chunks arrived: video=${totalVideoChunksReceived}, audio=${totalAudioChunksReceived}, resetting idle timer`);
+            continue;
+        }
+        
+        // No new chunks since last check - see if we've waited long enough
+        const idleTime = now - lastCheckTime;
+        if (idleTime >= CHUNK_IDLE_TIMEOUT_MS) {
+            // No chunks for CHUNK_IDLE_TIMEOUT_MS - we're done
+            console.log(`No new chunks for ${CHUNK_IDLE_TIMEOUT_MS}ms, encoding complete`);
+            console.log(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}`);
+            break;
+        }
     }
     
-    // Add additional safety delay to ensure all encoder callbacks complete
-    // This is critical for VP9/VP8 which can have delayed callbacks even after flush()
-    // VP9/VP8 encoders may continue to fire output callbacks up to ~200ms after flush completes
-    console.log('Waiting for delayed encoder callbacks to complete...');
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
-    // Check one more time if there are still pending chunks after the delay
+    // Wait for any pending chunks to finish writing
     if (pendingVideoChunks > 0 || pendingAudioChunks > 0) {
-        console.warn(`Still have pending chunks after delay: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
-        console.warn('Waiting a bit longer for these chunks to complete...');
-        await new Promise(resolve => setTimeout(resolve, 100));
+        console.log(`Waiting for pending chunks to finish: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
+        const pendingWaitStart = performance.now();
+        while ((pendingVideoChunks > 0 || pendingAudioChunks > 0) && (performance.now() - pendingWaitStart < 1000)) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        if (pendingVideoChunks > 0 || pendingAudioChunks > 0) {
+            console.warn(`Still have pending chunks after 1s wait: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
+        }
     }
     
     // Set progress to 100% when encoding is complete
