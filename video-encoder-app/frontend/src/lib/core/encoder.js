@@ -1,7 +1,19 @@
-import { Muxer as MP4Muxer, FileSystemWritableFileStreamTarget as MP4Target } from 'mp4-muxer';
-import { Muxer as WebMMuxer, FileSystemWritableFileStreamTarget as WebMTarget } from 'webm-muxer';
+import { Muxer as MP4Muxer, FileSystemWritableFileStreamTarget as MP4Target, ArrayBufferTarget as MP4ArrayBufferTarget } from 'mp4-muxer';
+import { Muxer as WebMMuxer, FileSystemWritableFileStreamTarget as WebMTarget, ArrayBufferTarget as WebMArrayBufferTarget } from 'webm-muxer';
 import { demuxAndDecode } from './demuxer.js';
 import { validateAudioBitrate, isAACCodec } from '../utils/audioUtils.js';
+
+// Helper class to unify ArrayBufferTarget interface between mp4-muxer and webm-muxer
+class ArrayBufferTarget {
+    constructor(container) {
+        this.container = container;
+        this.target = container === 'webm' ? new WebMArrayBufferTarget() : new MP4ArrayBufferTarget();
+    }
+    
+    get buffer() {
+        return this.target.buffer;
+    }
+}
 
 // Progress contribution: demuxing contributes 10% of total progress, encoding 90%
 const DEMUX_PROGRESS_PERCENTAGE = 10;
@@ -29,11 +41,24 @@ export async function encodeToFile(file, config, onProgress, signal) {
     const videoBitrateMbps = (config.video.bitrate / 1000000).toFixed(1);
     const suggestedName = `${originalNameWithoutExt}_${videoBitrateMbps}Mbps${fileExtension}`;
     
-    const handle = await window.showSaveFilePicker({
-        suggestedName: suggestedName,
-        types: [{ description: 'Video File', accept: { [mimeType]: [fileExtension] } }]
-    });
-    const fileStream = await handle.createWritable();
+    // Check if File System Access API is supported (not available in Firefox)
+    const supportsFileSystemAccess = 'showSaveFilePicker' in window;
+    
+    let fileStream;
+    let bufferTarget;
+    
+    if (supportsFileSystemAccess) {
+        const handle = await window.showSaveFilePicker({
+            suggestedName: suggestedName,
+            types: [{ description: 'Video File', accept: { [mimeType]: [fileExtension] } }]
+        });
+        fileStream = await handle.createWritable();
+    } else {
+        // Fallback for browsers without File System Access API (e.g., Firefox)
+        // Use ArrayBufferTarget to collect data in memory, then trigger download
+        console.log('File System Access API not supported, using in-memory buffer fallback');
+        bufferTarget = new ArrayBufferTarget(container);
+    }
 
     let muxer = null;
     let videoEncoder = null;
@@ -233,7 +258,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (container === 'webm') {
             // WebM muxer configuration
             const muxerConfig = {
-                target: new WebMTarget(fileStream),
+                target: fileStream ? new WebMTarget(fileStream) : bufferTarget.target,
                 video: { 
                     codec: videoMuxerCodec,
                     width: outputWidth, 
@@ -254,7 +279,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
         } else {
             // MP4 muxer configuration
             const muxerConfig = {
-                target: new MP4Target(fileStream),
+                target: fileStream ? new MP4Target(fileStream) : bufferTarget.target,
                 video: { 
                     codec: videoMuxerCodec,
                     width: outputWidth, 
@@ -435,13 +460,41 @@ export async function encodeToFile(file, config, onProgress, signal) {
         throw new DOMException('Encoding was cancelled', 'AbortError');
     }
     
+    // Add additional safety delay to ensure all encoder callbacks complete
+    // This is critical for VP9/VP8 which can have delayed callbacks even after flush()
+    // VP9/VP8 encoders may continue to fire output callbacks up to ~200ms after flush completes
+    console.log('Waiting for delayed encoder callbacks to complete...');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Check one more time if there are still pending chunks after the delay
+    if (pendingVideoChunks > 0 || pendingAudioChunks > 0) {
+        console.warn(`Still have pending chunks after delay: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
+        console.warn('Waiting a bit longer for these chunks to complete...');
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
     // Set progress to 100% when encoding is complete
     onProgress(100);
     
     // Mark muxer as finalized to prevent late encoder callbacks from adding chunks
+    // This MUST be set before calling muxer.finalize() to prevent race condition
     muxerFinalized = true;
     
     // Now safe to finalize - all chunks have been written
     muxer.finalize();
-    await fileStream.close();
+    
+    if (fileStream) {
+        await fileStream.close();
+    } else {
+        // For browsers without File System Access API, trigger a download
+        const buffer = bufferTarget.buffer;
+        const blob = new Blob([buffer], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = suggestedName;
+        a.click();
+        URL.revokeObjectURL(url);
+        console.log('File download triggered:', suggestedName);
+    }
 }
