@@ -19,17 +19,35 @@
       showThemeMenu = false;
     }
   }
+  
+  // Get display label for current theme
+  function getThemeLabel(themeName: string): string {
+    if (themeName === 'auto') {
+      return '自動 (システム)';
+    }
+    return themes[themeName]?.label || 'テーマ';
+  }
 </script>
 
 <svelte:window on:click={handleClickOutside} />
 
 <div class="theme-switcher">
   <button class="theme-button" on:click|stopPropagation={toggleThemeMenu} title="テーマ変更">
-    🎨 {themes[$currentTheme]?.label || 'テーマ'}
+    🎨 {getThemeLabel($currentTheme)}
   </button>
   
   {#if showThemeMenu}
     <div class="theme-menu">
+      <button
+        class="theme-option"
+        class:active={$currentTheme === 'auto'}
+        on:click|stopPropagation={() => selectTheme('auto')}
+      >
+        自動 (システム)
+        {#if $currentTheme === 'auto'}
+          <span class="checkmark">✓</span>
+        {/if}
+      </button>
       {#each Object.entries(themes) as [key, theme]}
         <button
           class="theme-option"
