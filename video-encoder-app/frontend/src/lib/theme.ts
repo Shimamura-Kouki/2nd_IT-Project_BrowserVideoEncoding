@@ -97,7 +97,7 @@ function getInitialTheme(): string {
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     if (stored) {
-      // If 'auto' is stored, resolve to system theme
+      // If 'auto' is stored, return it (will be resolved to system theme when applied)
       if (stored === 'auto') {
         return 'auto';
       }
