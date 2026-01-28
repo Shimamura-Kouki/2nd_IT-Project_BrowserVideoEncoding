@@ -3,6 +3,7 @@ name: Build and deploy static site
 on:
   push:
     branches: 
+      - main
       - feature/static-github-pages
   workflow_dispatch:
 
