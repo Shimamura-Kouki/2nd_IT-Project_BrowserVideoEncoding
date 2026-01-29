@@ -455,8 +455,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     // This is critical for VP9/VP8/AV1 encoders which continue to fire callbacks after flush()
     // IMPORTANT: Video encoder may start much later than audio encoder (can be seconds)
     // IMPORTANT: Video chunks may arrive very slowly (100-200ms apart) for complex codecs
+    // IMPORTANT: Firefox AV1 encoder is extremely slow but must not be killed if progressing
     const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
-    const MAX_WAIT_MS = 30000; // Maximum time to wait (safety timeout) - 30 seconds for slow encoding
+    const MAX_STALL_TIME_MS = 10000; // Maximum time without ANY chunks arriving before considering stalled (10s)
     const POLL_INTERVAL_MS = 50; // Check every 50ms
     
     console.log('Waiting for all encoder chunks to complete...');
@@ -470,6 +471,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let lastCheckTime = waitStartTime;
     let lastTotalVideoChunks = totalVideoChunksReceived;
     let lastTotalAudioChunks = totalAudioChunksReceived;
+    let lastChunkArrivalTime = waitStartTime; // Track when we last received ANY chunk
     
     // Poll until no new chunks arrive for CHUNK_IDLE_TIMEOUT_MS
     while (true) {
@@ -482,12 +484,18 @@ export async function encodeToFile(file, config, onProgress, signal) {
         
         const now = performance.now();
         const elapsedTotal = now - waitStartTime;
+        const timeSinceLastChunk = now - lastChunkArrivalTime;
         
-        // Safety timeout - prevent infinite waiting
-        if (elapsedTotal > MAX_WAIT_MS) {
-            console.warn(`Reached maximum wait time (${MAX_WAIT_MS}ms), proceeding with finalization`);
+        // Safety timeout - only if encoding has truly stalled (no chunks for MAX_STALL_TIME_MS)
+        // This allows slow encoders (like Firefox AV1) to take as long as needed, as long as they're making progress
+        if (timeSinceLastChunk > MAX_STALL_TIME_MS) {
+            console.warn(`Encoding appears stalled - no chunks for ${(timeSinceLastChunk / 1000).toFixed(1)}s`);
             console.warn(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}, pending video=${pendingVideoChunks}, pending audio=${pendingAudioChunks}`);
             console.warn(`Encoder start status: video=${videoEncoderStarted}, audio=${audioEncoderStarted}`);
+            if (totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
+                const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
+                console.warn(`Only received ${totalVideoChunksReceived}/${totalFrames} chunks (${coverage}%) before stall`);
+            }
             break;
         }
         
@@ -495,6 +503,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (totalVideoChunksReceived > lastTotalVideoChunks || totalAudioChunksReceived > lastTotalAudioChunks) {
             // New chunks arrived, reset the idle timer
             lastCheckTime = now;
+            lastChunkArrivalTime = now; // Update last chunk arrival time
             lastTotalVideoChunks = totalVideoChunksReceived;
             lastTotalAudioChunks = totalAudioChunksReceived;
             
