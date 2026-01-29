@@ -537,8 +537,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
         }
         
         // CRITICAL CHECK: If we know total frames, ensure we have received a reasonable number of chunks
-        // Video chunks should be at least 50% of total frames (accounting for B-frames, frame dropping, etc.)
-        if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < (totalFrames * 0.5)) {
+        // Video chunks should be at least 90% of total frames before allowing idle timeout
+        // (50% was too low - caused finalization at halfway point when chunks had a brief gap)
+        if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < (totalFrames * 0.9)) {
             // We haven't received enough video chunks yet
             // Only log occasionally to avoid spam
             if (elapsedTotal % 2000 < POLL_INTERVAL_MS) {
@@ -550,12 +551,22 @@ export async function encodeToFile(file, config, onProgress, signal) {
         }
         
         // No new chunks since last check AND all expected encoders have started
-        // AND we have enough chunks (or don't know expected count)
+        // AND we have enough chunks (≥90% or don't know expected count)
         // See if we've waited long enough
         const idleTime = now - lastCheckTime;
-        if (idleTime >= CHUNK_IDLE_TIMEOUT_MS) {
-            // No chunks for CHUNK_IDLE_TIMEOUT_MS - we're done
-            console.log(`No new chunks for ${CHUNK_IDLE_TIMEOUT_MS}ms, encoding complete`);
+        
+        // Use adaptive idle timeout based on chunk coverage
+        // If we're still below expected count, use a longer timeout to avoid premature finalization
+        let effectiveIdleTimeout = CHUNK_IDLE_TIMEOUT_MS;
+        if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
+            // We haven't received all expected chunks yet
+            // Use a longer idle timeout (2 seconds) to account for occasional gaps in chunk arrival
+            effectiveIdleTimeout = 2000;
+        }
+        
+        if (idleTime >= effectiveIdleTimeout) {
+            // No chunks for effectiveIdleTimeout - we're done
+            console.log(`No new chunks for ${effectiveIdleTimeout}ms, encoding complete`);
             console.log(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}`);
             if (totalFrames > 0) {
                 const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
