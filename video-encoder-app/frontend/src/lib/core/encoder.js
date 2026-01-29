@@ -522,14 +522,17 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10; // 0, 10, 20, ..., 90, 100
                 const lastPercent = Math.floor((lastTotalVideoChunks / totalFrames) * 10) * 10;
                 
-                // Check if we crossed a 10% milestone
+                // Check if we crossed a 10% milestone and haven't recorded it yet
                 if (currentPercent > lastPercent && currentPercent > 0 && currentPercent <= 100) {
-                    // Record this milestone
-                    milestones.push({
-                        percent: currentPercent,
-                        chunks: totalVideoChunksReceived,
-                        time: now
-                    });
+                    // Check if this milestone hasn't been recorded yet (avoid duplicates)
+                    if (!milestones.some(m => m.percent === currentPercent)) {
+                        // Record this milestone
+                        milestones.push({
+                            percent: currentPercent,
+                            chunks: totalVideoChunksReceived,
+                            time: now
+                        });
+                    }
                 }
             }
             
@@ -625,42 +628,63 @@ export async function encodeToFile(file, config, onProgress, signal) {
             // Log performance metrics
             if (videoEncodingStartTime !== null && totalVideoChunksReceived > 0) {
                 const totalEncodingTime = (now - videoEncodingStartTime) / 1000; // seconds
-                const averageFps = totalVideoChunksReceived / totalEncodingTime;
                 
-                console.log('\n=== Encoding Performance Metrics ===');
-                console.log(`Total encoding time: ${totalEncodingTime.toFixed(2)}s`);
-                console.log(`Average FPS: ${averageFps.toFixed(1)} fps`);
-                
-                // Calculate FPS for each 10% segment
-                if (milestones.length > 0) {
-                    console.log('\nFPS per 10% segment:');
+                // Guard against division by zero
+                if (totalEncodingTime > 0) {
+                    const averageFps = totalVideoChunksReceived / totalEncodingTime;
                     
-                    let prevPercent = 0;
-                    let prevChunks = 0;
-                    let prevTime = videoEncodingStartTime;
+                    console.log('\n=== Encoding Performance Metrics ===');
+                    console.log(`Total encoding time: ${totalEncodingTime.toFixed(2)}s`);
+                    console.log(`Average FPS: ${averageFps.toFixed(1)} fps`);
                     
-                    for (const milestone of milestones) {
-                        const chunksDiff = milestone.chunks - prevChunks;
-                        const timeDiff = (milestone.time - prevTime) / 1000; // seconds
-                        const segmentFps = chunksDiff / timeDiff;
+                    // Calculate FPS for each 10% segment
+                    if (milestones.length > 0) {
+                        console.log('\nFPS per 10% segment:');
                         
-                        console.log(`  ${prevPercent}%-${milestone.percent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
+                        let prevPercent = 0;
+                        let prevChunks = 0;
+                        let prevTime = videoEncodingStartTime;
                         
-                        prevPercent = milestone.percent;
-                        prevChunks = milestone.chunks;
-                        prevTime = milestone.time;
+                        for (const milestone of milestones) {
+                            const chunksDiff = milestone.chunks - prevChunks;
+                            const timeDiff = (milestone.time - prevTime) / 1000; // seconds
+                            
+                            // Guard against division by zero
+                            if (timeDiff > 0) {
+                                const segmentFps = chunksDiff / timeDiff;
+                                console.log(`  ${prevPercent}%-${milestone.percent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
+                            } else {
+                                console.log(`  ${prevPercent}%-${milestone.percent}%: N/A (${chunksDiff} chunks in <0.01s)`);
+                            }
+                            
+                            prevPercent = milestone.percent;
+                            prevChunks = milestone.chunks;
+                            prevTime = milestone.time;
+                        }
+                        
+                        // Add final segment if not at 100% or if we have chunks after the last milestone
+                        const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10;
+                        if (prevPercent < 100 && totalVideoChunksReceived > prevChunks) {
+                            const chunksDiff = totalVideoChunksReceived - prevChunks;
+                            const timeDiff = (now - prevTime) / 1000;
+                            
+                            // Guard against division by zero
+                            if (timeDiff > 0) {
+                                const segmentFps = chunksDiff / timeDiff;
+                                const finalPercent = Math.min(100, currentPercent);
+                                console.log(`  ${prevPercent}%-${finalPercent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
+                            } else {
+                                const finalPercent = Math.min(100, currentPercent);
+                                console.log(`  ${prevPercent}%-${finalPercent}%: N/A (${chunksDiff} chunks in <0.01s)`);
+                            }
+                        }
                     }
-                    
-                    // Add final segment if not at 100%
-                    if (prevPercent < 100 && totalVideoChunksReceived > prevChunks) {
-                        const chunksDiff = totalVideoChunksReceived - prevChunks;
-                        const timeDiff = (now - prevTime) / 1000;
-                        const segmentFps = chunksDiff / timeDiff;
-                        const finalPercent = Math.min(100, Math.floor((totalVideoChunksReceived / totalFrames) * 100));
-                        console.log(`  ${prevPercent}%-${finalPercent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
-                    }
+                    console.log('====================================\n');
+                } else {
+                    console.log('\n=== Encoding Performance Metrics ===');
+                    console.log('Encoding completed too quickly to measure (< 0.01s)');
+                    console.log('====================================\n');
                 }
-                console.log('====================================\n');
             }
             
             break;
