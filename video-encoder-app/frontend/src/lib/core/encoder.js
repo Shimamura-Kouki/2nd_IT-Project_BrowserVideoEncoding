@@ -458,8 +458,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
     // IMPORTANT: Firefox AV1 encoder is EXTREMELY slow (~5fps vs Chrome ~35fps)
     //            This is a browser implementation limitation - Firefox can have >10s gaps between chunks
     const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
-    const MAX_STALL_TIME_MS = 30000; // Maximum time without ANY chunks arriving before considering stalled (30s)
-                                     // Increased from 10s to accommodate Firefox's extremely slow AV1 encoder
+    const MAX_STALL_TIME_MS = 60000; // Maximum time without ANY chunks arriving before considering stalled (60s)
+                                     // Increased from 30s to accommodate Firefox's extremely slow AV1 encoder
     const POLL_INTERVAL_MS = 50; // Check every 50ms
     
     console.log('Waiting for all encoder chunks to complete...');
@@ -475,6 +475,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let lastTotalAudioChunks = totalAudioChunksReceived;
     let lastChunkArrivalTime = waitStartTime; // Track when we last received ANY chunk
     let lastLogTime = waitStartTime; // Track when we last logged chunk progress (to avoid log spam)
+    
+    // Performance tracking: record time at each 10% milestone
+    let videoEncodingStartTime = null; // When first video chunk arrives
+    const milestones = []; // Array of {percent, chunks, time} for each 10% milestone
     
     // Poll until no new chunks arrive for CHUNK_IDLE_TIMEOUT_MS
     while (true) {
@@ -507,6 +511,28 @@ export async function encodeToFile(file, config, onProgress, signal) {
             // New chunks arrived, reset the idle timer
             lastCheckTime = now;
             lastChunkArrivalTime = now; // Update last chunk arrival time
+            
+            // Track video encoding start time (when first video chunk arrives)
+            if (totalVideoChunksReceived > 0 && videoEncodingStartTime === null) {
+                videoEncodingStartTime = now;
+            }
+            
+            // Track 10% milestones for performance analysis
+            if (totalFrames > 0 && totalVideoChunksReceived > lastTotalVideoChunks) {
+                const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10; // 0, 10, 20, ..., 90, 100
+                const lastPercent = Math.floor((lastTotalVideoChunks / totalFrames) * 10) * 10;
+                
+                // Check if we crossed a 10% milestone
+                if (currentPercent > lastPercent && currentPercent > 0 && currentPercent <= 100) {
+                    // Record this milestone
+                    milestones.push({
+                        percent: currentPercent,
+                        chunks: totalVideoChunksReceived,
+                        time: now
+                    });
+                }
+            }
+            
             lastTotalVideoChunks = totalVideoChunksReceived;
             lastTotalAudioChunks = totalAudioChunksReceived;
             
@@ -595,6 +621,48 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     console.warn(`WARNING: Finalizing with incomplete video - missing ${totalFrames - totalVideoChunksReceived} chunks (${(100 - parseFloat(coverage)).toFixed(1)}%)`);
                 }
             }
+            
+            // Log performance metrics
+            if (videoEncodingStartTime !== null && totalVideoChunksReceived > 0) {
+                const totalEncodingTime = (now - videoEncodingStartTime) / 1000; // seconds
+                const averageFps = totalVideoChunksReceived / totalEncodingTime;
+                
+                console.log('\n=== Encoding Performance Metrics ===');
+                console.log(`Total encoding time: ${totalEncodingTime.toFixed(2)}s`);
+                console.log(`Average FPS: ${averageFps.toFixed(1)} fps`);
+                
+                // Calculate FPS for each 10% segment
+                if (milestones.length > 0) {
+                    console.log('\nFPS per 10% segment:');
+                    
+                    let prevPercent = 0;
+                    let prevChunks = 0;
+                    let prevTime = videoEncodingStartTime;
+                    
+                    for (const milestone of milestones) {
+                        const chunksDiff = milestone.chunks - prevChunks;
+                        const timeDiff = (milestone.time - prevTime) / 1000; // seconds
+                        const segmentFps = chunksDiff / timeDiff;
+                        
+                        console.log(`  ${prevPercent}%-${milestone.percent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
+                        
+                        prevPercent = milestone.percent;
+                        prevChunks = milestone.chunks;
+                        prevTime = milestone.time;
+                    }
+                    
+                    // Add final segment if not at 100%
+                    if (prevPercent < 100 && totalVideoChunksReceived > prevChunks) {
+                        const chunksDiff = totalVideoChunksReceived - prevChunks;
+                        const timeDiff = (now - prevTime) / 1000;
+                        const segmentFps = chunksDiff / timeDiff;
+                        const finalPercent = Math.min(100, Math.floor((totalVideoChunksReceived / totalFrames) * 100));
+                        console.log(`  ${prevPercent}%-${finalPercent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
+                    }
+                }
+                console.log('====================================\n');
+            }
+            
             break;
         }
     }
