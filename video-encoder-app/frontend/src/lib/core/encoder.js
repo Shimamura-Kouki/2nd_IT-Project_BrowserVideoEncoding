@@ -550,18 +550,32 @@ export async function encodeToFile(file, config, onProgress, signal) {
             continue;
         }
         
+        // CRITICAL CHECK: If we're still significantly below 100%, keep waiting
+        // At 96.7%, 2000ms idle timeout was triggering, losing 3.3% of chunks and corrupting the video
+        // Only allow idle timeout to finalize when we're very close to completion (≥99%)
+        if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < (totalFrames * 0.99)) {
+            // We're between 90-99%, keep waiting for more chunks
+            // Don't allow idle timeout to trigger - rely on stall detection (10s) instead
+            if (elapsedTotal % 2000 < POLL_INTERVAL_MS) {
+                const progress = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
+                console.log(`Still encoding: ${totalVideoChunksReceived}/${totalFrames} chunks (${progress}%), waiting for 99%+...`);
+            }
+            lastCheckTime = now; // Reset idle timer since we're still expecting more chunks
+            continue;
+        }
+        
         // No new chunks since last check AND all expected encoders have started
-        // AND we have enough chunks (≥90% or don't know expected count)
+        // AND we have enough chunks (≥99% or don't know expected count)
         // See if we've waited long enough
         const idleTime = now - lastCheckTime;
         
         // Use adaptive idle timeout based on chunk coverage
-        // If we're still below expected count, use a longer timeout to avoid premature finalization
-        let effectiveIdleTimeout = CHUNK_IDLE_TIMEOUT_MS;
+        // If we're still below expected count (99-100%), use a longer timeout
+        let effectiveIdleTimeout = CHUNK_IDLE_TIMEOUT_MS; // 500ms default
         if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
-            // We haven't received all expected chunks yet
-            // Use a longer idle timeout (2 seconds) to account for occasional gaps in chunk arrival
-            effectiveIdleTimeout = 2000;
+            // We're at 99%+ but not quite 100% yet
+            // Use a longer idle timeout (3 seconds) to ensure we get the last few chunks
+            effectiveIdleTimeout = 3000;
         }
         
         if (idleTime >= effectiveIdleTimeout) {
@@ -571,6 +585,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
             if (totalFrames > 0) {
                 const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
                 console.log(`Video chunk coverage: ${totalVideoChunksReceived}/${totalFrames} (${coverage}%)`);
+                if (totalVideoChunksReceived < totalFrames) {
+                    console.warn(`WARNING: Finalizing with incomplete video - missing ${totalFrames - totalVideoChunksReceived} chunks (${(100 - parseFloat(coverage)).toFixed(1)}%)`);
+                }
             }
             break;
         }
