@@ -455,9 +455,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
     // This is critical for VP9/VP8/AV1 encoders which continue to fire callbacks after flush()
     // IMPORTANT: Video encoder may start much later than audio encoder (can be seconds)
     // IMPORTANT: Video chunks may arrive very slowly (100-200ms apart) for complex codecs
-    // IMPORTANT: Firefox AV1 encoder is extremely slow but must not be killed if progressing
+    // IMPORTANT: Firefox AV1 encoder is EXTREMELY slow (~5fps vs Chrome ~35fps)
+    //            This is a browser implementation limitation - Firefox can have >10s gaps between chunks
     const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
-    const MAX_STALL_TIME_MS = 10000; // Maximum time without ANY chunks arriving before considering stalled (10s)
+    const MAX_STALL_TIME_MS = 30000; // Maximum time without ANY chunks arriving before considering stalled (30s)
+                                     // Increased from 10s to accommodate Firefox's extremely slow AV1 encoder
     const POLL_INTERVAL_MS = 50; // Check every 50ms
     
     console.log('Waiting for all encoder chunks to complete...');
@@ -472,6 +474,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let lastTotalVideoChunks = totalVideoChunksReceived;
     let lastTotalAudioChunks = totalAudioChunksReceived;
     let lastChunkArrivalTime = waitStartTime; // Track when we last received ANY chunk
+    let lastLogTime = waitStartTime; // Track when we last logged chunk progress (to avoid log spam)
     
     // Poll until no new chunks arrive for CHUNK_IDLE_TIMEOUT_MS
     while (true) {
@@ -507,9 +510,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
             lastTotalVideoChunks = totalVideoChunksReceived;
             lastTotalAudioChunks = totalAudioChunksReceived;
             
-            // Log progress periodically
-            if (totalVideoChunksReceived % 100 === 0 || elapsedTotal > 5000) {
+            // Log progress periodically to avoid performance impact from excessive logging
+            // Only log every 100 chunks OR every 2 seconds (whichever comes first)
+            // Note: Excessive console.log can slow down encoding significantly
+            if (totalVideoChunksReceived % 100 === 0 || (now - lastLogTime > 2000)) {
                 console.log(`New chunks arrived: video=${totalVideoChunksReceived}, audio=${totalAudioChunksReceived}, resetting idle timer`);
+                lastLogTime = now;
             }
             continue;
         }
