@@ -454,13 +454,17 @@ export async function encodeToFile(file, config, onProgress, signal) {
     // Wait until no new chunks have arrived for a sustained period
     // This is critical for VP9/VP8/AV1 encoders which continue to fire callbacks after flush()
     // IMPORTANT: Video encoder may start much later than audio encoder (can be seconds)
-    const CHUNK_IDLE_TIMEOUT_MS = 300; // Wait 300ms of no new chunks before considering done
-    const MAX_WAIT_MS = 10000; // Maximum time to wait (safety timeout) - increased to 10s
+    // IMPORTANT: Video chunks may arrive very slowly (100-200ms apart) for complex codecs
+    const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
+    const MAX_WAIT_MS = 30000; // Maximum time to wait (safety timeout) - 30 seconds for slow encoding
     const POLL_INTERVAL_MS = 50; // Check every 50ms
     
     console.log('Waiting for all encoder chunks to complete...');
     console.log(`Initial state: video chunks received=${totalVideoChunksReceived}, audio chunks received=${totalAudioChunksReceived}`);
     console.log(`Expected encoders: video=${hasVideoTrack ? 'yes' : 'no'}, audio=${hasAudioTrack ? 'yes' : 'no'}`);
+    if (totalFrames > 0) {
+        console.log(`Expected frames: ${totalFrames}`);
+    }
     
     const waitStartTime = performance.now();
     let lastCheckTime = waitStartTime;
@@ -493,7 +497,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
             lastCheckTime = now;
             lastTotalVideoChunks = totalVideoChunksReceived;
             lastTotalAudioChunks = totalAudioChunksReceived;
-            console.log(`New chunks arrived: video=${totalVideoChunksReceived}, audio=${totalAudioChunksReceived}, resetting idle timer`);
+            
+            // Log progress periodically
+            if (totalVideoChunksReceived % 100 === 0 || elapsedTotal > 5000) {
+                console.log(`New chunks arrived: video=${totalVideoChunksReceived}, audio=${totalAudioChunksReceived}, resetting idle timer`);
+            }
             continue;
         }
         
@@ -519,13 +527,31 @@ export async function encodeToFile(file, config, onProgress, signal) {
             continue;
         }
         
+        // CRITICAL CHECK: If we know total frames, ensure we have received a reasonable number of chunks
+        // Video chunks should be at least 50% of total frames (accounting for B-frames, frame dropping, etc.)
+        if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < (totalFrames * 0.5)) {
+            // We haven't received enough video chunks yet
+            // Only log occasionally to avoid spam
+            if (elapsedTotal % 2000 < POLL_INTERVAL_MS) {
+                const progress = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
+                console.log(`Still encoding: ${totalVideoChunksReceived}/${totalFrames} chunks (${progress}%), waiting for more...`);
+            }
+            lastCheckTime = now; // Reset idle timer since we're still expecting more chunks
+            continue;
+        }
+        
         // No new chunks since last check AND all expected encoders have started
+        // AND we have enough chunks (or don't know expected count)
         // See if we've waited long enough
         const idleTime = now - lastCheckTime;
         if (idleTime >= CHUNK_IDLE_TIMEOUT_MS) {
             // No chunks for CHUNK_IDLE_TIMEOUT_MS - we're done
             console.log(`No new chunks for ${CHUNK_IDLE_TIMEOUT_MS}ms, encoding complete`);
             console.log(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}`);
+            if (totalFrames > 0) {
+                const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
+                console.log(`Video chunk coverage: ${totalVideoChunksReceived}/${totalFrames} (${coverage}%)`);
+            }
             break;
         }
     }
