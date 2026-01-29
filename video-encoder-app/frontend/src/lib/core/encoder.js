@@ -126,6 +126,13 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let totalVideoChunksReceived = 0;
     let totalAudioChunksReceived = 0;
     
+    // Track if encoders have started producing output
+    // Critical: don't finalize until video encoder has started (if video exists)
+    let videoEncoderStarted = false;
+    let audioEncoderStarted = false;
+    let hasVideoTrack = true; // Assume true until we know otherwise
+    let hasAudioTrack = false; // Will be set based on config
+    
     // Guard flag to prevent multiple initializations
     // This prevents the race condition where initializeEncoders is called multiple times
     // (e.g., if demuxer's onReady callback fires multiple times)
@@ -135,7 +142,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
     // Callback to initialize muxer and encoders once we know the detected format
     const initializeEncoders = (detectedFormat) => {
         // Guard against multiple initializations
-        // If mp4boxfile.onReady fires multiple times, we should ignore subsequent calls
+        // If mp4boxfile.onReady fires multiple times, we should ignore subsequent call
         if (encodersInitialized) {
             console.warn('initializeEncoders called multiple times - ignoring subsequent call');
             return;
@@ -144,6 +151,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
         
         const { hasAudio, audioFormat, videoFormat, totalFrames: frames } = detectedFormat;
         totalFrames = frames ?? 0; // Store total frames for progress calculation
+        
+        // Track if we have audio track
+        hasAudioTrack = hasAudio && config.audio;
         
         // Pass metadata to the progress callback
         onProgress(undefined, undefined, detectedFormat);
@@ -276,6 +286,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
         videoEncoder = new VideoEncoder({
             output: (chunk, meta) => {
+                // Mark that video encoder has started producing chunks
+                if (!videoEncoderStarted) {
+                    videoEncoderStarted = true;
+                    console.log('✓ Video encoder started producing chunks');
+                }
+                
                 // Increment counter first to ensure proper tracking
                 pendingVideoChunks++;
                 totalVideoChunksReceived++;
@@ -308,6 +324,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
+                    // Mark that audio encoder has started producing chunks
+                    if (!audioEncoderStarted) {
+                        audioEncoderStarted = true;
+                        console.log('✓ Audio encoder started producing chunks');
+                    }
+                    
                     // Increment counter first to ensure proper tracking
                     pendingAudioChunks++;
                     totalAudioChunksReceived++;
@@ -430,13 +452,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
     encodingComplete = true;
     
     // Wait until no new chunks have arrived for a sustained period
-    // This is critical for VP9/VP8 encoders which continue to fire callbacks after flush()
+    // This is critical for VP9/VP8/AV1 encoders which continue to fire callbacks after flush()
+    // IMPORTANT: Video encoder may start much later than audio encoder (can be seconds)
     const CHUNK_IDLE_TIMEOUT_MS = 300; // Wait 300ms of no new chunks before considering done
-    const MAX_WAIT_MS = 5000; // Maximum time to wait (safety timeout)
+    const MAX_WAIT_MS = 10000; // Maximum time to wait (safety timeout) - increased to 10s
     const POLL_INTERVAL_MS = 50; // Check every 50ms
     
     console.log('Waiting for all encoder chunks to complete...');
     console.log(`Initial state: video chunks received=${totalVideoChunksReceived}, audio chunks received=${totalAudioChunksReceived}`);
+    console.log(`Expected encoders: video=${hasVideoTrack ? 'yes' : 'no'}, audio=${hasAudioTrack ? 'yes' : 'no'}`);
     
     const waitStartTime = performance.now();
     let lastCheckTime = waitStartTime;
@@ -459,6 +483,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (elapsedTotal > MAX_WAIT_MS) {
             console.warn(`Reached maximum wait time (${MAX_WAIT_MS}ms), proceeding with finalization`);
             console.warn(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}, pending video=${pendingVideoChunks}, pending audio=${pendingAudioChunks}`);
+            console.warn(`Encoder start status: video=${videoEncoderStarted}, audio=${audioEncoderStarted}`);
             break;
         }
         
@@ -472,7 +497,30 @@ export async function encodeToFile(file, config, onProgress, signal) {
             continue;
         }
         
-        // No new chunks since last check - see if we've waited long enough
+        // CRITICAL CHECK: Don't finalize until video encoder has started producing chunks
+        // Video encoder can start much later than audio encoder (especially for AV1)
+        if (hasVideoTrack && !videoEncoderStarted) {
+            // Video encoder hasn't started yet, keep waiting
+            if (elapsedTotal > 2000 && elapsedTotal % 1000 < POLL_INTERVAL_MS) {
+                // Log every second after 2 seconds
+                console.log(`Still waiting for video encoder to start... (${(elapsedTotal / 1000).toFixed(1)}s elapsed)`);
+            }
+            lastCheckTime = now; // Reset idle timer since we're still waiting for video to start
+            continue;
+        }
+        
+        // Check if audio encoder should have started
+        if (hasAudioTrack && !audioEncoderStarted) {
+            // Audio encoder hasn't started yet, keep waiting
+            if (elapsedTotal > 2000 && elapsedTotal % 1000 < POLL_INTERVAL_MS) {
+                console.log(`Still waiting for audio encoder to start... (${(elapsedTotal / 1000).toFixed(1)}s elapsed)`);
+            }
+            lastCheckTime = now; // Reset idle timer since we're still waiting for audio to start
+            continue;
+        }
+        
+        // No new chunks since last check AND all expected encoders have started
+        // See if we've waited long enough
         const idleTime = now - lastCheckTime;
         if (idleTime >= CHUNK_IDLE_TIMEOUT_MS) {
             // No chunks for CHUNK_IDLE_TIMEOUT_MS - we're done
