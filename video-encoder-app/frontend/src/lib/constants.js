@@ -11,5 +11,5 @@ export const MINIMUM_VIDEO_BITRATE = 100000; // 100 Kbps minimum to ensure playa
 // Keyframe interval for video encoding (in seconds)
 // Controls frequency of I-frames/keyframes for seeking performance
 // 2 seconds provides good balance between file size and seek responsiveness
-// For WebM, this also affects cluster boundaries when streaming: false
+// For WebM, this also affects cluster boundaries in non-streaming mode
 export const KEYFRAME_INTERVAL_SECONDS = 2;
