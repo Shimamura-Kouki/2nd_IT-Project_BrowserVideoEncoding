@@ -1,5 +1,5 @@
 import MP4Box from 'mp4box';
-import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE } from '../constants.js';
+import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE, MAX_MP4BOX_PARSING_ERRORS } from '../constants.js';
 
 // Progress contribution: demuxing contributes 10% of total progress, encoding 90%
 const DEMUX_PROGRESS_PERCENTAGE = 10;
@@ -12,6 +12,7 @@ const DEMUX_PROGRESS_PERCENTAGE = 10;
  * @param {(detectedFormat: {hasAudio: boolean, audioFormat?: {sampleRate: number, numberOfChannels: number, bitrate: number|null}, videoFormat?: {width: number, height: number, codec: string, framerate: number|null, bitrate: number|null}, totalFrames: number})=>void} onReady - Called when metadata is ready with detected format info
  * @param {(pct:number)=>void} onProgress
  * @returns {Promise<{hasAudio: boolean}>}
+ * @throws {Error} When too many MP4Box parsing errors occur or file chunk processing fails
  */
 export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, onProgress) {
     return new Promise((resolve, reject) => {
@@ -29,7 +30,6 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         let readyCallbackFired = false;
         // Error tracking for MP4Box parsing
         let parsingErrorCount = 0;
-        const MAX_PARSING_ERRORS = 10; // Maximum number of parsing errors before aborting
 
         mp4boxfile.onReady = (info) => {
             // Guard against multiple onReady events
@@ -146,10 +146,10 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         // Add error handler for MP4Box parsing errors
         mp4boxfile.onError = (e) => {
             parsingErrorCount++;
-            console.error(`MP4Box parsing error (${parsingErrorCount}/${MAX_PARSING_ERRORS}):`, e);
+            console.error(`MP4Box parsing error (${parsingErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, e);
             
             // If we've exceeded the maximum number of parsing errors, reject the promise
-            if (parsingErrorCount >= MAX_PARSING_ERRORS) {
+            if (parsingErrorCount >= MAX_MP4BOX_PARSING_ERRORS) {
                 const errorMsg = 'Too many MP4Box parsing errors. The file may be corrupted or in an unsupported format.';
                 console.error(errorMsg);
                 reject(new Error(errorMsg));
@@ -202,8 +202,22 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 resolve({ hasAudio });
             }
         } catch (error) {
-            console.error('Error processing file chunk:', error);
-            reject(new Error(`Failed to process file chunk: ${error.message}`));
+            // Increment error counter for consistency with onError handler
+            parsingErrorCount++;
+            console.error(`Error processing file chunk (${parsingErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, error);
+            
+            // Use same error threshold as async errors for consistent behavior
+            if (parsingErrorCount >= MAX_MP4BOX_PARSING_ERRORS) {
+                reject(new Error(`Failed to process file chunk: ${error.message}`));
+            } else {
+                // Try to continue with next chunk if we haven't exceeded threshold
+                if (offset < file.size) {
+                    readNextChunk();
+                } else {
+                    // If this was the last chunk, resolve anyway
+                    resolve({ hasAudio });
+                }
+            }
         }
     };
 

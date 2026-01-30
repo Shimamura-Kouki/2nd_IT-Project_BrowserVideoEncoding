@@ -3,7 +3,7 @@
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
   import { roundToValidAACBitrate } from './lib/utils/audioUtils.js';
-  import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE } from './lib/constants.js';
+  import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE, MAX_MP4BOX_PARSING_ERRORS } from './lib/constants.js';
   import MP4Box from 'mp4box';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
 
@@ -134,7 +134,6 @@
         const arrayBuffer = await file.arrayBuffer();
         const mp4boxfile = MP4Box.createFile();
         let analysisErrorCount = 0;
-        const MAX_ANALYSIS_ERRORS = 10;
         
         mp4boxfile.onReady = (info: any) => {
           const videoTrack = info.videoTracks?.[0];
@@ -179,11 +178,11 @@
         
         mp4boxfile.onError = (e: any) => {
           analysisErrorCount++;
-          console.error(`MP4Box analysis error (${analysisErrorCount}/${MAX_ANALYSIS_ERRORS}):`, e);
+          console.error(`MP4Box analysis error (${analysisErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, e);
           
           // If too many errors occur during analysis, mark analysis as failed
           // but still allow the file to be selected (demuxer will try again)
-          if (analysisErrorCount >= MAX_ANALYSIS_ERRORS) {
+          if (analysisErrorCount >= MAX_MP4BOX_PARSING_ERRORS) {
             console.warn('File analysis failed due to too many errors. Video metadata may be incomplete.');
             // Mark as analyzed anyway to avoid blocking user
             sourceFileAnalyzed = true;
@@ -201,6 +200,8 @@
         }
       } catch (error) {
         console.error('Failed to analyze file:', error);
+        // Mark as analyzed to allow user to proceed even if initial setup fails
+        sourceFileAnalyzed = true;
       }
     }
   };
