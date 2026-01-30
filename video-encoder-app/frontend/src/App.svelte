@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
   import { roundToValidAACBitrate } from './lib/utils/audioUtils.js';
@@ -427,14 +427,10 @@
 
   async function startEncoding() {
     if (!file) return;
-    
-    // Wrap initial state updates in untrack to avoid reactive context warnings in async function
-    untrack(() => {
-      message = '';
-      errorLogs = []; // Clear error logs when starting new encoding
-      encoding = true;
-      paused = false;
-    });
+    message = '';
+    errorLogs = []; // Clear error logs when starting new encoding
+    encoding = true;
+    paused = false;
     abortController = new AbortController();
     
     try {
@@ -487,26 +483,23 @@
 
       const start = performance.now();
       await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number, etaMs?: number }, metadata?: any) => {
-        // Use untrack to avoid "reactive context" warning when updating state from async callback
-        untrack(() => {
-          if (pct !== undefined) progressPct = pct;
-          if (stats) { 
-            fps = stats.fps; 
-            elapsedMs = stats.elapsedMs;
-            etaMs = stats.etaMs ?? 0;
+        if (pct !== undefined) progressPct = pct;
+        if (stats) { 
+          fps = stats.fps; 
+          elapsedMs = stats.elapsedMs;
+          etaMs = stats.etaMs ?? 0;
+        }
+        // Capture source file metadata when available
+        if (metadata && metadata.videoFormat && !sourceFileAnalyzed) {
+          originalWidth = metadata.videoFormat.width || 0;
+          originalHeight = metadata.videoFormat.height || 0;
+          originalFramerate = metadata.videoFormat.framerate || 0;
+          originalVideoBitrate = metadata.videoFormat.bitrate || 0;
+          if (metadata.audioFormat) {
+            originalAudioBitrate = metadata.audioFormat.bitrate || 0;
           }
-          // Capture source file metadata when available
-          if (metadata && metadata.videoFormat && !sourceFileAnalyzed) {
-            originalWidth = metadata.videoFormat.width || 0;
-            originalHeight = metadata.videoFormat.height || 0;
-            originalFramerate = metadata.videoFormat.framerate || 0;
-            originalVideoBitrate = metadata.videoFormat.bitrate || 0;
-            if (metadata.audioFormat) {
-              originalAudioBitrate = metadata.audioFormat.bitrate || 0;
-            }
-            sourceFileAnalyzed = true;
-          }
-        });
+          sourceFileAnalyzed = true;
+        }
       }, abortController.signal);
 
       const end = performance.now();
@@ -517,34 +510,25 @@
         avg_fps: fps
       };
 
-      // Wrap state update after await in untrack
-      untrack(() => {
-        message = `エンコードが完了しました (処理時間: ${result.process_time_ms}ms, 平均FPS: ${result.avg_fps.toFixed(1)})`;
-      });
+      message = `エンコードが完了しました (処理時間: ${result.process_time_ms}ms, 平均FPS: ${result.avg_fps.toFixed(1)})`;
     } catch (error: any) {
       // Handle errors, including AbortError when user cancels file save dialog or stops encoding
-      // Wrap state updates in catch block with untrack
-      untrack(() => {
-        if (error.name === 'AbortError') {
-          if (abortController?.signal.aborted) {
-            message = 'エンコードが中止されました';
-            console.log('Encoding was stopped by user');
-          } else {
-            message = 'ファイル保存がキャンセルされました';
-            console.log('User cancelled file save dialog');
-          }
+      if (error.name === 'AbortError') {
+        if (abortController?.signal.aborted) {
+          message = 'エンコードが中止されました';
+          console.log('Encoding was stopped by user');
         } else {
-          message = `エラーが発生しました: ${error.message}`;
-          console.error('Encoding error:', error);
+          message = 'ファイル保存がキャンセルされました';
+          console.log('User cancelled file save dialog');
         }
-      });
+      } else {
+        message = `エラーが発生しました: ${error.message}`;
+        console.error('Encoding error:', error);
+      }
     } finally {
       // Always reset encoding state to allow user to retry
-      // Wrap state updates in finally block with untrack
-      untrack(() => {
-        encoding = false;
-        paused = false;
-      });
+      encoding = false;
+      paused = false;
       abortController = null;
     }
   }
