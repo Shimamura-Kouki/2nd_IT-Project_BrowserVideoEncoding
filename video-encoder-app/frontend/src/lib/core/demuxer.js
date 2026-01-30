@@ -27,6 +27,21 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         // - Progressive loading triggers re-parsing of file structure
         // - Corrupt or non-standard MP4 files are being processed
         let readyCallbackFired = false;
+        
+        // Suppress non-critical BoxParser warnings during progressive parsing
+        // These warnings occur when MP4Box encounters incomplete box structures
+        // while loading data progressively. They are not actual errors and
+        // processing continues normally. MP4Box handles these by waiting for more data.
+        const originalConsoleError = console.error;
+        const suppressBoxParserWarnings = (...args) => {
+            // Filter out BoxParser size validation warnings which are expected during progressive loading
+            const message = args.join(' ');
+            if (message.includes('[BoxParser]') && message.includes('greater than its container size')) {
+                return; // Suppress this expected warning
+            }
+            originalConsoleError.apply(console, args);
+        };
+        console.error = suppressBoxParserWarnings;
 
         mp4boxfile.onReady = (info) => {
             // Guard against multiple onReady events
@@ -122,7 +137,8 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         };
 
         mp4boxfile.onError = (e) => {
-            console.error('MP4Box error during demuxing:', e);
+            console.error = originalConsoleError; // Restore console.error
+            originalConsoleError('MP4Box error during demuxing:', e);
             reject(new Error(`Failed to parse MP4 file: ${e}`));
         };
 
@@ -167,11 +183,13 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             readNextChunk();
         } else {
             mp4boxfile.flush();
+            console.error = originalConsoleError; // Restore console.error
             resolve({ hasAudio });
         }
     };
 
     reader.onerror = () => {
+        console.error = originalConsoleError; // Restore console.error
         reject(new Error('Failed to read file'));
     };
 
