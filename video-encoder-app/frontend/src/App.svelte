@@ -25,6 +25,7 @@
 
   // Browser compatibility detection
   let isFirefox = false;
+  let isSafari = false;
   let showBrowserWarning = true;
 
   // Source file metadata (extracted from demuxer)
@@ -543,8 +544,10 @@
   onMount(() => {
     presets = loadPresets();
     
-    // Detect Firefox browser
-    isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+    // Detect Firefox and Safari browsers
+    const userAgent = navigator.userAgent.toLowerCase();
+    isFirefox = userAgent.includes('firefox');
+    isSafari = userAgent.includes('safari') && !userAgent.includes('chrome') && !userAgent.includes('chromium');
     
     // Intercept console.error to capture error logs
     const originalConsoleError = console.error;
@@ -868,21 +871,38 @@
     <ThemeSwitcher />
   </div>
 
-  {#if isFirefox && showBrowserWarning}
+  {#if (isFirefox || isSafari) && showBrowserWarning}
     <div class="browser-warning">
       <div class="browser-warning-header">
         <h3>⚠️ ブラウザ互換性警告</h3>
         <button class="close-btn" on:click={() => showBrowserWarning = false}>×</button>
       </div>
-      <p>
-        <strong>Firefoxでは既知の問題があります。</strong>
-        WebCodecs APIの実装に不具合があり、以下のコーデックで正常に動作しない可能性があります:
-      </p>
-      <ul>
-        <li>AV1コーデック - エンコードが100%完了しない</li>
-        <li>VP9コーデック - エンコードが100%完了しない</li>
-        <li>H.264コーデック - エラーが発生する可能性</li>
-      </ul>
+      
+      {#if isFirefox}
+        <p>
+          <strong>Firefoxでは既知の問題があります。</strong>
+          WebCodecs APIの実装に不具合があり、以下のコーデックで正常に動作しない可能性があります:
+        </p>
+        <ul>
+          <li>AV1コーデック - エンコードが100%完了しない</li>
+          <li>VP9コーデック - エンコードが100%完了しない</li>
+          <li>H.264コーデック - エラーが発生する可能性</li>
+        </ul>
+      {/if}
+      
+      {#if isSafari}
+        <p>
+          <strong>Safari/iOSでは既知の問題があります。</strong>
+          WebCodecs APIの実装に不具合があり、以下の問題が発生します:
+        </p>
+        <ul>
+          <li>音声エンコーダーの起動に失敗する場合がある</li>
+          <li>特定のコーデックがサポートされていない</li>
+          <li>エンコード処理が不安定で、エラーが発生する可能性</li>
+          <li>ファイルの読み込みに問題が発生する場合がある</li>
+        </ul>
+      {/if}
+      
       <p>
         <strong>推奨ブラウザ:</strong> Google Chrome または Microsoft Edge の最新版をご使用ください。
       </p>
