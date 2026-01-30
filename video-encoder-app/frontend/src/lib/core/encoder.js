@@ -347,7 +347,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
                         pendingAudioChunks--;
                     }
                 },
-                error: (e) => console.error('AudioEncoder error', e)
+                error: (e) => {
+                    console.error('AudioEncoder error', e);
+                    // Mark that we should not wait for audio encoder if it has errors
+                    hasAudioTrack = false;
+                }
             });
 
             // Configure AudioEncoder with detected format from source file
@@ -359,12 +363,21 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
             }
             
-            audioEncoder.configure({
-                codec: config.audio.codec ?? 'mp4a.40.2',
-                sampleRate: audioFormat.sampleRate,
-                numberOfChannels: audioFormat.numberOfChannels,
-                bitrate: audioBitrate
-            });
+            try {
+                audioEncoder.configure({
+                    codec: config.audio.codec ?? 'mp4a.40.2',
+                    sampleRate: audioFormat.sampleRate,
+                    numberOfChannels: audioFormat.numberOfChannels,
+                    bitrate: audioBitrate
+                });
+                console.log(`✓ Audio encoder configured: ${config.audio.codec} (${audioFormat.sampleRate}Hz, ${audioFormat.numberOfChannels} channels, ${audioBitrate}bps)`);
+            } catch (audioEncoderConfigError) {
+                // Audio encoder configuration failed - continue with video only
+                console.error('Failed to configure audio encoder:', audioEncoderConfigError);
+                console.warn(`Continuing without audio encoding. Codec ${config.audio.codec} may not be supported by this browser.`);
+                hasAudioTrack = false;
+                audioEncoder = null;
+            }
         }
     };
 
@@ -413,7 +426,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
             }
             audioData.close();
         },
-        error: (e) => console.error('AudioDecoder error', e)
+        error: (e) => {
+            console.error('AudioDecoder error:', e);
+            // Mark that we should not wait for audio encoder if decoder has errors
+            hasAudioTrack = false;
+        }
     });
 
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));

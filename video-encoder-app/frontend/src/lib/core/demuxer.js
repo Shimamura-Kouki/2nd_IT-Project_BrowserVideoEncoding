@@ -86,7 +86,6 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 // First, determine audio bitrate to use in video bitrate calculation
                 let audioBitrate = null;
                 if (audioTrack && audioDecoder) {
-                    hasAudio = true;
                     audioTrackId = audioTrack.id;
                     
                     // Calculate audio bitrate
@@ -102,12 +101,25 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                         numberOfChannels: audioTrack.audio.channel_count,
                         bitrate: audioBitrate
                     };
-                    audioDecoder.configure({
-                        codec: audioTrack.codec,
-                        sampleRate: audioTrack.audio.sample_rate,
-                        numberOfChannels: audioTrack.audio.channel_count
-                    });
-                    mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
+                    
+                    // Try to configure audio decoder - if it fails, continue without audio
+                    try {
+                        audioDecoder.configure({
+                            codec: audioTrack.codec,
+                            sampleRate: audioTrack.audio.sample_rate,
+                            numberOfChannels: audioTrack.audio.channel_count
+                        });
+                        mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
+                        hasAudio = true;
+                        console.log(`✓ Audio decoder configured: ${audioTrack.codec} (${audioTrack.audio.sample_rate}Hz, ${audioTrack.audio.channel_count} channels)`);
+                    } catch (audioConfigError) {
+                        // Audio decoder configuration failed - continue with video only
+                        console.error('Failed to configure audio decoder:', audioConfigError);
+                        console.warn(`Continuing without audio. Codec ${audioTrack.codec} may not be supported by this browser.`);
+                        hasAudio = false;
+                        audioTrackId = null;
+                        detectedAudioFormat = null;
+                    }
                 }
                 
                 if (videoTrack) {
