@@ -133,6 +133,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let hasVideoTrack = true; // Assume true until we know otherwise
     let hasAudioTrack = false; // Will be set based on config
 
+    // Track audio decoder frames for debugging
+    let audioDecoderFrameCount = 0;
+
     // Guard flag to prevent multiple initializations
     // This prevents the race condition where initializeEncoders is called multiple times
     // (e.g., if demuxer's onReady callback fires multiple times)
@@ -238,89 +241,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
         const videoMuxerCodec = getMuxerCodec(config.video.codec, 'video');
         const audioMuxerCodec = config.audio ? getMuxerCodec(config.audio.codec, 'audio') : null;
 
-        // Create muxer with appropriate configuration based on container
-        if (container === 'webm') {
-            // WebM muxer configuration
-            const muxerConfig = {
-                target: fileStream ? new WebMTarget(fileStream) : bufferTarget.target,
-                video: {
-                    codec: videoMuxerCodec,
-                    width: outputWidth,
-                    height: outputHeight
-                },
-                firstTimestampBehavior: 'offset'
-            };
-
-            if (hasAudio && config.audio && audioFormat) {
-                muxerConfig.audio = {
-                    codec: audioMuxerCodec,
-                    sampleRate: audioFormat.sampleRate,
-                    numberOfChannels: audioFormat.numberOfChannels
-                };
-            }
-
-            muxer = new WebMMuxer(muxerConfig);
-        } else {
-            // MP4 muxer configuration
-            const muxerConfig = {
-                target: fileStream ? new MP4Target(fileStream) : bufferTarget.target,
-                video: {
-                    codec: videoMuxerCodec,
-                    width: outputWidth,
-                    height: outputHeight
-                },
-                fastStart: false,
-                firstTimestampBehavior: 'offset'
-            };
-
-            if (hasAudio && config.audio && audioFormat) {
-                muxerConfig.audio = {
-                    codec: audioMuxerCodec,
-                    sampleRate: audioFormat.sampleRate,
-                    numberOfChannels: audioFormat.numberOfChannels
-                };
-            }
-
-            muxer = new MP4Muxer(muxerConfig);
-        }
-
-        videoEncoder = new VideoEncoder({
-            output: (chunk, meta) => {
-                // Mark that video encoder has started producing chunks
-                if (!videoEncoderStarted) {
-                    videoEncoderStarted = true;
-                    console.log('✓ Video encoder started producing chunks');
-                }
-
-                // Increment counter first to ensure proper tracking
-                pendingVideoChunks++;
-                totalVideoChunksReceived++;
-                lastVideoChunkTime = performance.now();
-
-                try {
-                    // Ignore chunks that arrive after muxer finalization with a warning
-                    // This can happen with VP9/VP8 encoders which may have delayed callbacks
-                    if (muxerFinalized) {
-                        console.warn(`VideoEncoder output callback fired after muxer finalization - ignoring chunk ${totalVideoChunksReceived}`);
-                        return;
-                    }
-                    muxer.addVideoChunk(chunk, meta);
-                } finally {
-                    pendingVideoChunks--;
-                }
-            },
-            error: (e) => console.error('VideoEncoder error', e)
-        });
-
-        videoEncoder.configure({
-            codec: config.video.codec ?? 'avc1.640028',
-            width: outputWidth,
-            height: outputHeight,
-            bitrate: config.video.bitrate,
-            framerate: outputFramerate,
-            latencyMode: 'quality'
-        });
-
+        // First, try to create and configure audio encoder if needed
+        // This allows us to know if audio encoding is actually possible before creating the muxer
+        let audioEncoderReady = false;
         if (hasAudio && config.audio && audioFormat) {
             audioEncoder = new AudioEncoder({
                 output: (chunk, meta) => {
@@ -347,9 +270,200 @@ export async function encodeToFile(file, config, onProgress, signal) {
                         pendingAudioChunks--;
                     }
                 },
-                error: (e) => {
-                    console.error('AudioEncoder error:', e);
-                    // Mark that we should not wait for audio encoder if it has errors
+                error: (e) => console.error('AudioEncoder error', e)
+            });
+
+            // Configure AudioEncoder with detected format from source file
+            // Apply AAC bitrate rounding to valid values if needed
+            let audioBitrate = config.audio.bitrate;
+            if (isAACCodec(config.audio.codec)) {
+                audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
+            }
+
+            try {
+                console.log(`Configuring AudioEncoder: codec=${config.audio.codec}, sampleRate=${audioFormat.sampleRate}, channels=${audioFormat.numberOfChannels}, bitrate=${audioBitrate}`);
+
+                // Validate sample rate for AAC codec
+                if (isAACCodec(config.audio.codec)) {
+                    const validSampleRates = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000];
+                    if (!validSampleRates.includes(audioFormat.sampleRate)) {
+                        console.warn(`Warning: Sample rate ${audioFormat.sampleRate} may not be supported by AAC encoder. Supported rates: ${validSampleRates.join(', ')}`);
+                    }
+                }
+
+                audioEncoder.configure({
+                    codec: config.audio.codec ?? 'mp4a.40.2',
+                    sampleRate: audioFormat.sampleRate,
+                    numberOfChannels: audioFormat.numberOfChannels,
+                    bitrate: audioBitrate
+                });
+                console.log(`AudioEncoder configured successfully, state=${audioEncoder.state}`);
+                audioEncoderReady = true;
+            } catch (e) {
+                console.error('Failed to configure AudioEncoder:', e);
+                // Close the encoder and disable audio
+                try {
+                    audioEncoder.close();
+                } catch (closeError) {
+                    // Ignore close errors
+                }
+                audioEncoder = null;
+                console.warn('Audio encoding will be disabled due to configuration error');
+            }
+        }
+
+
+        // Create muxer with appropriate configuration based on container
+        // Only include audio track if audioEncoder was successfully configured
+        if (container === 'webm') {
+            // WebM muxer configuration
+            const muxerConfig = {
+                target: fileStream ? new WebMTarget(fileStream) : bufferTarget.target,
+                video: {
+                    codec: videoMuxerCodec,
+                    width: outputWidth,
+                    height: outputHeight
+                },
+                firstTimestampBehavior: 'offset'
+            };
+
+            if (hasAudio && config.audio && audioFormat) {
+
+                // Only add audio track if encoder was successfully configured
+                if (audioEncoderReady && audioEncoder) {
+                    muxerConfig.audio = {
+                        codec: audioMuxerCodec,
+                        sampleRate: audioFormat.sampleRate,
+                        numberOfChannels: audioFormat.numberOfChannels
+                    };
+                }
+
+                muxer = new WebMMuxer(muxerConfig);
+            } else {
+                // MP4 muxer configuration
+                const muxerConfig = {
+                    target: fileStream ? new MP4Target(fileStream) : bufferTarget.target,
+                    video: {
+                        codec: videoMuxerCodec,
+                        width: outputWidth,
+                        height: outputHeight
+                    },
+                    fastStart: false,
+                    firstTimestampBehavior: 'offset'
+                };
+
+                // Only add audio track if encoder was successfully configured
+                if (audioEncoderReady && audioEncoder) {
+                    muxerConfig.audio = {
+                        codec: audioMuxerCodec,
+                        sampleRate: audioFormat.sampleRate,
+                        numberOfChannels: audioFormat.numberOfChannels
+                    };
+                }
+
+                muxer = new MP4Muxer(muxerConfig);
+            }
+
+            videoEncoder = new VideoEncoder({
+                output: (chunk, meta) => {
+                    // Mark that video encoder has started producing chunks
+                    if (!videoEncoderStarted) {
+                        videoEncoderStarted = true;
+                        console.log('✓ Video encoder started producing chunks');
+                    }
+
+                    // Increment counter first to ensure proper tracking
+                    pendingVideoChunks++;
+                    totalVideoChunksReceived++;
+                    lastVideoChunkTime = performance.now();
+
+                    try {
+                        // Ignore chunks that arrive after muxer finalization with a warning
+                        // This can happen with VP9/VP8 encoders which may have delayed callbacks
+                        if (muxerFinalized) {
+                            console.warn(`VideoEncoder output callback fired after muxer finalization - ignoring chunk ${totalVideoChunksReceived}`);
+                            return;
+                        }
+                        muxer.addVideoChunk(chunk, meta);
+                    } finally {
+                        pendingVideoChunks--;
+                    }
+                },
+                error: (e) => console.error('VideoEncoder error', e)
+            });
+
+            videoEncoder.configure({
+                codec: config.video.codec ?? 'avc1.640028',
+                width: outputWidth,
+                height: outputHeight,
+                bitrate: config.video.bitrate,
+                framerate: outputFramerate,
+                latencyMode: 'quality'
+            });
+
+            if (hasAudio && config.audio && audioFormat) {
+                audioEncoder = new AudioEncoder({
+                    output: (chunk, meta) => {
+                        // Mark that audio encoder has started producing chunks
+                        if (!audioEncoderStarted) {
+                            audioEncoderStarted = true;
+                            console.log('✓ Audio encoder started producing chunks');
+                        }
+
+                        // Increment counter first to ensure proper tracking
+                        pendingAudioChunks++;
+                        totalAudioChunksReceived++;
+                        lastAudioChunkTime = performance.now();
+
+                        try {
+                            // Ignore chunks that arrive after muxer finalization with a warning
+                            // This can happen with some audio encoders which may have delayed callbacks
+                            if (muxerFinalized) {
+                                console.warn(`AudioEncoder output callback fired after muxer finalization - ignoring chunk ${totalAudioChunksReceived}`);
+                                return;
+                            }
+                            muxer.addAudioChunk(chunk, meta);
+                        } finally {
+                            pendingAudioChunks--;
+                        }
+                    },
+                    error: (e) => {
+                        console.error('AudioEncoder error:', e);
+                        // Mark that we should not wait for audio encoder if it has errors
+                        hasAudioTrack = false;
+                        // Clean up the audio encoder
+                        if (audioEncoder && audioEncoder.state !== 'closed') {
+                            try {
+                                audioEncoder.close();
+                            } catch (closeError) {
+                                console.error('Error closing audio encoder:', closeError);
+                            }
+                        }
+                        audioEncoder = null;
+                    }
+                });
+
+                // Configure AudioEncoder with detected format from source file
+                // This ensures compatibility with decoded audio data
+                // Apply AAC bitrate rounding to valid values if needed
+                let audioBitrate = config.audio.bitrate;
+                if (isAACCodec(config.audio.codec)) {
+                    // AAC-LC and AAC-HE: Round to nearest valid value using shared utility
+                    audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
+                }
+
+                try {
+                    audioEncoder.configure({
+                        codec: config.audio.codec ?? 'mp4a.40.2',
+                        sampleRate: audioFormat.sampleRate,
+                        numberOfChannels: audioFormat.numberOfChannels,
+                        bitrate: audioBitrate
+                    });
+                    console.log(`✓ Audio encoder configured: ${config.audio.codec} (${audioFormat.sampleRate}Hz, ${audioFormat.numberOfChannels} channels, ${audioBitrate}bps)`);
+                } catch (audioEncoderConfigError) {
+                    // Audio encoder configuration failed - continue with video only
+                    console.error('Failed to configure audio encoder:', audioEncoderConfigError);
+                    console.warn(`Continuing without audio encoding. Codec ${config.audio.codec} may not be supported by this browser.`);
                     hasAudioTrack = false;
                     // Clean up the audio encoder
                     if (audioEncoder && audioEncoder.state !== 'closed') {
@@ -361,413 +475,402 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     }
                     audioEncoder = null;
                 }
-            });
-
-            // Configure AudioEncoder with detected format from source file
-            // This ensures compatibility with decoded audio data
-            // Apply AAC bitrate rounding to valid values if needed
-            let audioBitrate = config.audio.bitrate;
-            if (isAACCodec(config.audio.codec)) {
-                // AAC-LC and AAC-HE: Round to nearest valid value using shared utility
-                audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
             }
+        };
 
-            try {
-                audioEncoder.configure({
-                    codec: config.audio.codec ?? 'mp4a.40.2',
-                    sampleRate: audioFormat.sampleRate,
-                    numberOfChannels: audioFormat.numberOfChannels,
-                    bitrate: audioBitrate
-                });
-                console.log(`✓ Audio encoder configured: ${config.audio.codec} (${audioFormat.sampleRate}Hz, ${audioFormat.numberOfChannels} channels, ${audioBitrate}bps)`);
-            } catch (audioEncoderConfigError) {
-                // Audio encoder configuration failed - continue with video only
-                console.error('Failed to configure audio encoder:', audioEncoderConfigError);
-                console.warn(`Continuing without audio encoding. Codec ${config.audio.codec} may not be supported by this browser.`);
+        const videoDecoder = new VideoDecoder({
+            output: (frame) => {
+                frameCount++;
+                if (videoEncoder && videoEncoder.state === 'configured') {
+                    try {
+                        videoEncoder.encode(frame);
+                    } catch (e) {
+                        console.error('VideoEncoder encode error:', e);
+                    }
+                }
+                frame.close();
+                const elapsedMs = performance.now() - start;
+                const fps = frameCount / (elapsedMs / 1000);
+
+                // Calculate progress: DEMUX_PROGRESS_PERCENTAGE for demuxing (already done) + remaining for encoding
+                // Encoding progress is based on frames processed vs total frames
+                let encodingProgress = DEMUX_PROGRESS_PERCENTAGE; // Start at demuxing complete
+                if (totalFrames > 0) {
+                    encodingProgress = DEMUX_PROGRESS_PERCENTAGE + (frameCount / totalFrames) * ENCODING_PROGRESS_PERCENTAGE;
+                }
+
+                // Calculate estimated time to completion (ETA)
+                let etaMs = 0;
+                if (totalFrames > 0 && frameCount > 0 && frameCount < totalFrames) {
+                    const progressRatio = frameCount / totalFrames;
+                    const estimatedTotalMs = elapsedMs / progressRatio;
+                    etaMs = estimatedTotalMs - elapsedMs;
+                }
+
+                onProgress(encodingProgress, { fps, elapsedMs, etaMs });
+            },
+            error: (e) => console.error('VideoDecoder error', e)
+        });
+
+        const audioDecoder = new AudioDecoder({
+            output: (audioData) => {
+                audioDecoderFrameCount++;
+                // Log first few frames for debugging
+                if (audioDecoderFrameCount <= 3) {
+                    console.log(`AudioDecoder output #${audioDecoderFrameCount}: timestamp=${audioData.timestamp}, duration=${audioData.duration}, frames=${audioData.numberOfFrames}`);
+                }
+                if (audioEncoder && audioEncoder.state === 'configured') {
+                    try {
+                        audioEncoder.encode(audioData);
+                    } catch (e) {
+                        console.error('AudioEncoder encode error:', e);
+                    }
+                } else {
+                    // Log first few times audio data is being dropped
+                    if (audioDecoderFrameCount <= 3) {
+                        if (audioEncoder) {
+                            console.warn(`AudioEncoder not ready: state=${audioEncoder.state}, dropping audio frame #${audioDecoderFrameCount}`);
+                        } else {
+                            console.warn(`AudioEncoder not initialized, dropping audio frame #${audioDecoderFrameCount}`);
+                        }
+                    }
+                }
+                audioData.close();
+            },
+            error: (e) => {
+                console.error('AudioDecoder error:', e);
+                // Mark that we should not wait for audio encoder if decoder has errors
                 hasAudioTrack = false;
-                // Clean up the audio encoder
+                // Clean up the audio encoder since decoder failed
                 if (audioEncoder && audioEncoder.state !== 'closed') {
                     try {
                         audioEncoder.close();
                     } catch (closeError) {
-                        console.error('Error closing audio encoder:', closeError);
+                        console.error('Error closing audio encoder after decoder error:', closeError);
                     }
                 }
                 audioEncoder = null;
             }
-        }
-    };
+        });
 
-    const videoDecoder = new VideoDecoder({
-        output: (frame) => {
-            frameCount++;
-            if (videoEncoder && videoEncoder.state === 'configured') {
-                try {
-                    videoEncoder.encode(frame);
-                } catch (e) {
-                    console.error('VideoEncoder encode error:', e);
-                }
-            }
-            frame.close();
-            const elapsedMs = performance.now() - start;
-            const fps = frameCount / (elapsedMs / 1000);
+        const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
 
-            // Calculate progress: DEMUX_PROGRESS_PERCENTAGE for demuxing (already done) + remaining for encoding
-            // Encoding progress is based on frames processed vs total frames
-            let encodingProgress = DEMUX_PROGRESS_PERCENTAGE; // Start at demuxing complete
-            if (totalFrames > 0) {
-                encodingProgress = DEMUX_PROGRESS_PERCENTAGE + (frameCount / totalFrames) * ENCODING_PROGRESS_PERCENTAGE;
-            }
-
-            // Calculate estimated time to completion (ETA)
-            let etaMs = 0;
-            if (totalFrames > 0 && frameCount > 0 && frameCount < totalFrames) {
-                const progressRatio = frameCount / totalFrames;
-                const estimatedTotalMs = elapsedMs / progressRatio;
-                etaMs = estimatedTotalMs - elapsedMs;
-            }
-
-            onProgress(encodingProgress, { fps, elapsedMs, etaMs });
-        },
-        error: (e) => console.error('VideoDecoder error', e)
-    });
-
-    const audioDecoder = new AudioDecoder({
-        output: (audioData) => {
-            if (audioEncoder && audioEncoder.state === 'configured') {
-                try {
-                    audioEncoder.encode(audioData);
-                } catch (e) {
-                    console.error('AudioEncoder encode error:', e);
-                }
-            }
-            audioData.close();
-        },
-        error: (e) => {
-            console.error('AudioDecoder error:', e);
-            // Mark that we should not wait for audio encoder if decoder has errors
-            hasAudioTrack = false;
-            // Clean up the audio encoder since decoder failed
-            if (audioEncoder && audioEncoder.state !== 'closed') {
-                try {
-                    audioEncoder.close();
-                } catch (closeError) {
-                    console.error('Error closing audio encoder after decoder error:', closeError);
-                }
-            }
-            audioEncoder = null;
-        }
-    });
-
-    const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
-
-    // Check if aborted after demuxing
-    if (aborted || (signal && signal.aborted)) {
-        throw new DOMException('Encoding was cancelled', 'AbortError');
-    }
-
-    // Flush encoders and wait for all output callbacks to complete
-    try {
-        await videoEncoder.flush();
-    } catch (e) {
-        console.error('VideoEncoder flush error:', e);
-    }
-
-    // Check if aborted after video flush
-    if (aborted || (signal && signal.aborted)) {
-        throw new DOMException('Encoding was cancelled', 'AbortError');
-    }
-
-    if (audioEncoder) {
-        try {
-            await audioEncoder.flush();
-        } catch (e) {
-            console.error('AudioEncoder flush error:', e);
-        }
-    }
-
-    // Check if aborted after audio flush
-    if (aborted || (signal && signal.aborted)) {
-        throw new DOMException('Encoding was cancelled', 'AbortError');
-    }
-
-    // Mark encoding as complete
-    encodingComplete = true;
-
-    // Wait until no new chunks have arrived for a sustained period
-    // This is critical for VP9/VP8/AV1 encoders which continue to fire callbacks after flush()
-    // IMPORTANT: Video encoder may start much later than audio encoder (can be seconds)
-    // IMPORTANT: Video chunks may arrive very slowly (100-200ms apart) for complex codecs
-    // IMPORTANT: Firefox AV1 encoder is EXTREMELY slow (~5fps vs Chrome ~35fps)
-    //            This is a browser implementation limitation - Firefox can have >10s gaps between chunks
-    const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
-    const MAX_STALL_TIME_MS = 60000; // Maximum time without ANY chunks arriving before considering stalled (60s)
-    // Increased from 30s to accommodate Firefox's extremely slow AV1 encoder
-    const POLL_INTERVAL_MS = 50; // Check every 50ms
-
-    console.log('Waiting for all encoder chunks to complete...');
-    console.log(`Initial state: video chunks received=${totalVideoChunksReceived}, audio chunks received=${totalAudioChunksReceived}`);
-    console.log(`Expected encoders: video=${hasVideoTrack ? 'yes' : 'no'}, audio=${hasAudioTrack ? 'yes' : 'no'}`);
-    if (totalFrames > 0) {
-        console.log(`Expected frames: ${totalFrames}`);
-    }
-
-    const waitStartTime = performance.now();
-    let lastCheckTime = waitStartTime;
-    let lastTotalVideoChunks = totalVideoChunksReceived;
-    let lastTotalAudioChunks = totalAudioChunksReceived;
-    let lastChunkArrivalTime = waitStartTime; // Track when we last received ANY chunk
-    let lastLogTime = waitStartTime; // Track when we last logged chunk progress (to avoid log spam)
-
-    // Performance tracking: record time at each 10% milestone
-    let videoEncodingStartTime = null; // When first video chunk arrives
-    const milestones = []; // Array of {percent, chunks, time} for each 10% milestone
-
-    // Poll until no new chunks arrive for CHUNK_IDLE_TIMEOUT_MS
-    while (true) {
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
-
-        // Check if aborted during wait
+        // Check if aborted after demuxing
         if (aborted || (signal && signal.aborted)) {
             throw new DOMException('Encoding was cancelled', 'AbortError');
         }
 
-        const now = performance.now();
-        const elapsedTotal = now - waitStartTime;
-        const timeSinceLastChunk = now - lastChunkArrivalTime;
-
-        // Safety timeout - only if encoding has truly stalled (no chunks for MAX_STALL_TIME_MS)
-        // This allows slow encoders (like Firefox AV1) to take as long as needed, as long as they're making progress
-        if (timeSinceLastChunk > MAX_STALL_TIME_MS) {
-            console.warn(`Encoding appears stalled - no chunks for ${(timeSinceLastChunk / 1000).toFixed(1)}s`);
-            console.warn(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}, pending video=${pendingVideoChunks}, pending audio=${pendingAudioChunks}`);
-            console.warn(`Encoder start status: video=${videoEncoderStarted}, audio=${audioEncoderStarted}`);
-            if (totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
-                const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
-                console.warn(`Only received ${totalVideoChunksReceived}/${totalFrames} chunks (${coverage}%) before stall`);
-            }
-            break;
+        // Flush encoders and wait for all output callbacks to complete
+        try {
+            await videoEncoder.flush();
+        } catch (e) {
+            console.error('VideoEncoder flush error:', e);
         }
 
-        // Check if new chunks arrived since last check
-        if (totalVideoChunksReceived > lastTotalVideoChunks || totalAudioChunksReceived > lastTotalAudioChunks) {
-            // New chunks arrived, reset the idle timer
-            lastCheckTime = now;
-            lastChunkArrivalTime = now; // Update last chunk arrival time
+        // Check if aborted after video flush
+        if (aborted || (signal && signal.aborted)) {
+            throw new DOMException('Encoding was cancelled', 'AbortError');
+        }
 
-            // Track video encoding start time (when first video chunk arrives)
-            if (totalVideoChunksReceived > 0 && videoEncodingStartTime === null) {
-                videoEncodingStartTime = now;
-            }
+        if (audioEncoder && audioEncoder.state === 'configured') {
 
-            // Track 10% milestones for performance analysis
-            if (totalFrames > 0 && totalVideoChunksReceived > lastTotalVideoChunks) {
-                const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10; // 0, 10, 20, ..., 90, 100
-                const lastPercent = Math.floor((lastTotalVideoChunks / totalFrames) * 10) * 10;
-
-                // Check if we crossed a 10% milestone and haven't recorded it yet
-                if (currentPercent > lastPercent && currentPercent > 0 && currentPercent <= 100) {
-                    // Check if this milestone hasn't been recorded yet (avoid duplicates)
-                    if (!milestones.some(m => m.percent === currentPercent)) {
-                        // Record this milestone
-                        milestones.push({
-                            percent: currentPercent,
-                            chunks: totalVideoChunksReceived,
-                            time: now
-                        });
+            if (audioEncoder) {
+                try {
+                    // Only flush if encoder has processed frames
+                    if (totalAudioChunksReceived > 0) {
+                        await audioEncoder.flush();
+                    } else {
+                        console.warn('Skipping audio encoder flush: no audio chunks were encoded');
                     }
+                } catch (e) {
+                    console.error('AudioEncoder flush error:', e);
                 }
+            } else if (audioEncoder) {
+                console.warn(`Skipping audio encoder flush: encoder state is '${audioEncoder.state}' (expected 'configured')`);
             }
 
-            lastTotalVideoChunks = totalVideoChunksReceived;
-            lastTotalAudioChunks = totalAudioChunksReceived;
-
-            // Log progress periodically to avoid performance impact from excessive logging
-            // Only log every 100 chunks OR every 2 seconds (whichever comes first)
-            // Note: Excessive console.log can slow down encoding significantly
-            if (totalVideoChunksReceived % 100 === 0 || (now - lastLogTime > 2000)) {
-                console.log(`New chunks arrived: video=${totalVideoChunksReceived}, audio=${totalAudioChunksReceived}, resetting idle timer`);
-                lastLogTime = now;
+            // Check if aborted after audio flush
+            if (aborted || (signal && signal.aborted)) {
+                throw new DOMException('Encoding was cancelled', 'AbortError');
             }
-            continue;
-        }
 
-        // CRITICAL CHECK: Don't finalize until video encoder has started producing chunks
-        // Video encoder can start much later than audio encoder (especially for AV1)
-        if (hasVideoTrack && !videoEncoderStarted) {
-            // Video encoder hasn't started yet, keep waiting
-            if (elapsedTotal > 2000 && elapsedTotal % 1000 < POLL_INTERVAL_MS) {
-                // Log every second after 2 seconds
-                console.log(`Still waiting for video encoder to start... (${(elapsedTotal / 1000).toFixed(1)}s elapsed)`);
-            }
-            lastCheckTime = now; // Reset idle timer since we're still waiting for video to start
-            continue;
-        }
+            // Mark encoding as complete
+            encodingComplete = true;
 
-        // Check if audio encoder should have started
-        if (hasAudioTrack && !audioEncoderStarted) {
-            // Audio encoder hasn't started yet, keep waiting
-            if (elapsedTotal > 2000 && elapsedTotal % 1000 < POLL_INTERVAL_MS) {
-                console.log(`Still waiting for audio encoder to start... (${(elapsedTotal / 1000).toFixed(1)}s elapsed)`);
-            }
-            lastCheckTime = now; // Reset idle timer since we're still waiting for audio to start
-            continue;
-        }
+            // Wait until no new chunks have arrived for a sustained period
+            // This is critical for VP9/VP8/AV1 encoders which continue to fire callbacks after flush()
+            // IMPORTANT: Video encoder may start much later than audio encoder (can be seconds)
+            // IMPORTANT: Video chunks may arrive very slowly (100-200ms apart) for complex codecs
+            // IMPORTANT: Firefox AV1 encoder is EXTREMELY slow (~5fps vs Chrome ~35fps)
+            //            This is a browser implementation limitation - Firefox can have >10s gaps between chunks
+            const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
+            const MAX_STALL_TIME_MS = 60000; // Maximum time without ANY chunks arriving before considering stalled (60s)
+            // Increased from 30s to accommodate Firefox's extremely slow AV1 encoder
+            const POLL_INTERVAL_MS = 50; // Check every 50ms
 
-        // CRITICAL CHECK: If we know total frames, ensure we have received a reasonable number of chunks
-        // Video chunks should be at least 90% of total frames before allowing idle timeout
-        // (50% was too low - caused finalization at halfway point when chunks had a brief gap)
-        if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < (totalFrames * 0.9)) {
-            // We haven't received enough video chunks yet
-            // Only log occasionally to avoid spam
-            if (elapsedTotal % 2000 < POLL_INTERVAL_MS) {
-                const progress = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
-                console.log(`Still encoding: ${totalVideoChunksReceived}/${totalFrames} chunks (${progress}%), waiting for more...`);
-            }
-            lastCheckTime = now; // Reset idle timer since we're still expecting more chunks
-            continue;
-        }
-
-        // CRITICAL CHECK: If we're still significantly below 100%, keep waiting
-        // At 96.7%, 2000ms idle timeout was triggering, losing 3.3% of chunks and corrupting the video
-        // Only allow idle timeout to finalize when we're very close to completion (≥99%)
-        if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < (totalFrames * 0.99)) {
-            // We're between 90-99%, keep waiting for more chunks
-            // Don't allow idle timeout to trigger - rely on stall detection (10s) instead
-            if (elapsedTotal % 2000 < POLL_INTERVAL_MS) {
-                const progress = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
-                console.log(`Still encoding: ${totalVideoChunksReceived}/${totalFrames} chunks (${progress}%), waiting for 99%+...`);
-            }
-            lastCheckTime = now; // Reset idle timer since we're still expecting more chunks
-            continue;
-        }
-
-        // No new chunks since last check AND all expected encoders have started
-        // AND we have enough chunks (≥99% or don't know expected count)
-        // See if we've waited long enough
-        const idleTime = now - lastCheckTime;
-
-        // Use adaptive idle timeout based on chunk coverage
-        // If we're still below expected count (99-100%), use a longer timeout
-        let effectiveIdleTimeout = CHUNK_IDLE_TIMEOUT_MS; // 500ms default
-        if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
-            // We're at 99%+ but not quite 100% yet
-            // Use a longer idle timeout (3 seconds) to ensure we get the last few chunks
-            effectiveIdleTimeout = 3000;
-        }
-
-        if (idleTime >= effectiveIdleTimeout) {
-            // No chunks for effectiveIdleTimeout - we're done
-            console.log(`No new chunks for ${effectiveIdleTimeout}ms, encoding complete`);
-            console.log(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}`);
+            console.log('Waiting for all encoder chunks to complete...');
+            console.log(`Initial state: video chunks received=${totalVideoChunksReceived}, audio chunks received=${totalAudioChunksReceived}`);
+            console.log(`Expected encoders: video=${hasVideoTrack ? 'yes' : 'no'}, audio=${hasAudioTrack ? 'yes' : 'no'}`);
             if (totalFrames > 0) {
-                const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
-                console.log(`Video chunk coverage: ${totalVideoChunksReceived}/${totalFrames} (${coverage}%)`);
-                if (totalVideoChunksReceived < totalFrames) {
-                    console.warn(`WARNING: Finalizing with incomplete video - missing ${totalFrames - totalVideoChunksReceived} chunks (${(100 - parseFloat(coverage)).toFixed(1)}%)`);
-                }
+                console.log(`Expected frames: ${totalFrames}`);
             }
 
-            // Log performance metrics
-            if (videoEncodingStartTime !== null && totalVideoChunksReceived > 0) {
-                const totalEncodingTime = (now - videoEncodingStartTime) / 1000; // seconds
+            const waitStartTime = performance.now();
+            let lastCheckTime = waitStartTime;
+            let lastTotalVideoChunks = totalVideoChunksReceived;
+            let lastTotalAudioChunks = totalAudioChunksReceived;
+            let lastChunkArrivalTime = waitStartTime; // Track when we last received ANY chunk
+            let lastLogTime = waitStartTime; // Track when we last logged chunk progress (to avoid log spam)
 
-                // Guard against division by zero
-                if (totalEncodingTime > 0) {
-                    const averageFps = totalVideoChunksReceived / totalEncodingTime;
+            // Performance tracking: record time at each 10% milestone
+            let videoEncodingStartTime = null; // When first video chunk arrives
+            const milestones = []; // Array of {percent, chunks, time} for each 10% milestone
 
-                    console.log('\n=== Encoding Performance Metrics ===');
-                    console.log(`Total encoding time: ${totalEncodingTime.toFixed(2)}s`);
-                    console.log(`Average FPS: ${averageFps.toFixed(1)} fps`);
+            // Poll until no new chunks arrive for CHUNK_IDLE_TIMEOUT_MS
+            while (true) {
+                await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
 
-                    // Calculate FPS for each 10% segment
-                    if (milestones.length > 0) {
-                        console.log('\nFPS per 10% segment:');
+                // Check if aborted during wait
+                if (aborted || (signal && signal.aborted)) {
+                    throw new DOMException('Encoding was cancelled', 'AbortError');
+                }
 
-                        let prevPercent = 0;
-                        let prevChunks = 0;
-                        let prevTime = videoEncodingStartTime;
+                const now = performance.now();
+                const elapsedTotal = now - waitStartTime;
+                const timeSinceLastChunk = now - lastChunkArrivalTime;
 
-                        for (const milestone of milestones) {
-                            const chunksDiff = milestone.chunks - prevChunks;
-                            const timeDiff = (milestone.time - prevTime) / 1000; // seconds
+                // Safety timeout - only if encoding has truly stalled (no chunks for MAX_STALL_TIME_MS)
+                // This allows slow encoders (like Firefox AV1) to take as long as needed, as long as they're making progress
+                if (timeSinceLastChunk > MAX_STALL_TIME_MS) {
+                    console.warn(`Encoding appears stalled - no chunks for ${(timeSinceLastChunk / 1000).toFixed(1)}s`);
+                    console.warn(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}, pending video=${pendingVideoChunks}, pending audio=${pendingAudioChunks}`);
+                    console.warn(`Encoder start status: video=${videoEncoderStarted}, audio=${audioEncoderStarted}`);
+                    if (totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
+                        const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
+                        console.warn(`Only received ${totalVideoChunksReceived}/${totalFrames} chunks (${coverage}%) before stall`);
+                    }
+                    break;
+                }
 
-                            // Guard against division by zero
-                            if (timeDiff > 0) {
-                                const segmentFps = chunksDiff / timeDiff;
-                                console.log(`  ${prevPercent}%-${milestone.percent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
-                            } else {
-                                console.log(`  ${prevPercent}%-${milestone.percent}%: N/A (${chunksDiff} chunks in <0.01s)`);
-                            }
+                // Check if new chunks arrived since last check
+                if (totalVideoChunksReceived > lastTotalVideoChunks || totalAudioChunksReceived > lastTotalAudioChunks) {
+                    // New chunks arrived, reset the idle timer
+                    lastCheckTime = now;
+                    lastChunkArrivalTime = now; // Update last chunk arrival time
 
-                            prevPercent = milestone.percent;
-                            prevChunks = milestone.chunks;
-                            prevTime = milestone.time;
-                        }
+                    // Track video encoding start time (when first video chunk arrives)
+                    if (totalVideoChunksReceived > 0 && videoEncodingStartTime === null) {
+                        videoEncodingStartTime = now;
+                    }
 
-                        // Add final segment if not at 100% or if we have chunks after the last milestone
-                        const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10;
-                        if (prevPercent < 100 && totalVideoChunksReceived > prevChunks) {
-                            const chunksDiff = totalVideoChunksReceived - prevChunks;
-                            const timeDiff = (now - prevTime) / 1000;
+                    // Track 10% milestones for performance analysis
+                    if (totalFrames > 0 && totalVideoChunksReceived > lastTotalVideoChunks) {
+                        const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10; // 0, 10, 20, ..., 90, 100
+                        const lastPercent = Math.floor((lastTotalVideoChunks / totalFrames) * 10) * 10;
 
-                            // Guard against division by zero
-                            if (timeDiff > 0) {
-                                const segmentFps = chunksDiff / timeDiff;
-                                const finalPercent = Math.min(100, currentPercent);
-                                console.log(`  ${prevPercent}%-${finalPercent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
-                            } else {
-                                const finalPercent = Math.min(100, currentPercent);
-                                console.log(`  ${prevPercent}%-${finalPercent}%: N/A (${chunksDiff} chunks in <0.01s)`);
+                        // Check if we crossed a 10% milestone and haven't recorded it yet
+                        if (currentPercent > lastPercent && currentPercent > 0 && currentPercent <= 100) {
+                            // Check if this milestone hasn't been recorded yet (avoid duplicates)
+                            if (!milestones.some(m => m.percent === currentPercent)) {
+                                // Record this milestone
+                                milestones.push({
+                                    percent: currentPercent,
+                                    chunks: totalVideoChunksReceived,
+                                    time: now
+                                });
                             }
                         }
                     }
-                    console.log('====================================\n');
-                } else {
-                    console.log('\n=== Encoding Performance Metrics ===');
-                    console.log('Encoding completed too quickly to measure (< 0.01s)');
-                    console.log('====================================\n');
+
+                    lastTotalVideoChunks = totalVideoChunksReceived;
+                    lastTotalAudioChunks = totalAudioChunksReceived;
+
+                    // Log progress periodically to avoid performance impact from excessive logging
+                    // Only log every 100 chunks OR every 2 seconds (whichever comes first)
+                    // Note: Excessive console.log can slow down encoding significantly
+                    if (totalVideoChunksReceived % 100 === 0 || (now - lastLogTime > 2000)) {
+                        console.log(`New chunks arrived: video=${totalVideoChunksReceived}, audio=${totalAudioChunksReceived}, resetting idle timer`);
+                        lastLogTime = now;
+                    }
+                    continue;
+                }
+
+                // CRITICAL CHECK: Don't finalize until video encoder has started producing chunks
+                // Video encoder can start much later than audio encoder (especially for AV1)
+                if (hasVideoTrack && !videoEncoderStarted) {
+                    // Video encoder hasn't started yet, keep waiting
+                    if (elapsedTotal > 2000 && elapsedTotal % 1000 < POLL_INTERVAL_MS) {
+                        // Log every second after 2 seconds
+                        console.log(`Still waiting for video encoder to start... (${(elapsedTotal / 1000).toFixed(1)}s elapsed)`);
+                    }
+                    lastCheckTime = now; // Reset idle timer since we're still waiting for video to start
+                    continue;
+                }
+
+                // Check if audio encoder should have started
+                if (hasAudioTrack && !audioEncoderStarted) {
+                    // Audio encoder hasn't started yet, keep waiting
+                    if (elapsedTotal > 2000 && elapsedTotal % 1000 < POLL_INTERVAL_MS) {
+                        console.log(`Still waiting for audio encoder to start... (${(elapsedTotal / 1000).toFixed(1)}s elapsed)`);
+                    }
+                    lastCheckTime = now; // Reset idle timer since we're still waiting for audio to start
+                    continue;
+                }
+
+                // CRITICAL CHECK: If we know total frames, ensure we have received a reasonable number of chunks
+                // Video chunks should be at least 90% of total frames before allowing idle timeout
+                // (50% was too low - caused finalization at halfway point when chunks had a brief gap)
+                if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < (totalFrames * 0.9)) {
+                    // We haven't received enough video chunks yet
+                    // Only log occasionally to avoid spam
+                    if (elapsedTotal % 2000 < POLL_INTERVAL_MS) {
+                        const progress = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
+                        console.log(`Still encoding: ${totalVideoChunksReceived}/${totalFrames} chunks (${progress}%), waiting for more...`);
+                    }
+                    lastCheckTime = now; // Reset idle timer since we're still expecting more chunks
+                    continue;
+                }
+
+                // CRITICAL CHECK: If we're still significantly below 100%, keep waiting
+                // At 96.7%, 2000ms idle timeout was triggering, losing 3.3% of chunks and corrupting the video
+                // Only allow idle timeout to finalize when we're very close to completion (≥99%)
+                if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < (totalFrames * 0.99)) {
+                    // We're between 90-99%, keep waiting for more chunks
+                    // Don't allow idle timeout to trigger - rely on stall detection (10s) instead
+                    if (elapsedTotal % 2000 < POLL_INTERVAL_MS) {
+                        const progress = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
+                        console.log(`Still encoding: ${totalVideoChunksReceived}/${totalFrames} chunks (${progress}%), waiting for 99%+...`);
+                    }
+                    lastCheckTime = now; // Reset idle timer since we're still expecting more chunks
+                    continue;
+                }
+
+                // No new chunks since last check AND all expected encoders have started
+                // AND we have enough chunks (≥99% or don't know expected count)
+                // See if we've waited long enough
+                const idleTime = now - lastCheckTime;
+
+                // Use adaptive idle timeout based on chunk coverage
+                // If we're still below expected count (99-100%), use a longer timeout
+                let effectiveIdleTimeout = CHUNK_IDLE_TIMEOUT_MS; // 500ms default
+                if (hasVideoTrack && totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
+                    // We're at 99%+ but not quite 100% yet
+                    // Use a longer idle timeout (3 seconds) to ensure we get the last few chunks
+                    effectiveIdleTimeout = 3000;
+                }
+
+                if (idleTime >= effectiveIdleTimeout) {
+                    // No chunks for effectiveIdleTimeout - we're done
+                    console.log(`No new chunks for ${effectiveIdleTimeout}ms, encoding complete`);
+                    console.log(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}`);
+                    if (totalFrames > 0) {
+                        const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
+                        console.log(`Video chunk coverage: ${totalVideoChunksReceived}/${totalFrames} (${coverage}%)`);
+                        if (totalVideoChunksReceived < totalFrames) {
+                            console.warn(`WARNING: Finalizing with incomplete video - missing ${totalFrames - totalVideoChunksReceived} chunks (${(100 - parseFloat(coverage)).toFixed(1)}%)`);
+                        }
+                    }
+
+                    // Log performance metrics
+                    if (videoEncodingStartTime !== null && totalVideoChunksReceived > 0) {
+                        const totalEncodingTime = (now - videoEncodingStartTime) / 1000; // seconds
+
+                        // Guard against division by zero
+                        if (totalEncodingTime > 0) {
+                            const averageFps = totalVideoChunksReceived / totalEncodingTime;
+
+                            console.log('\n=== Encoding Performance Metrics ===');
+                            console.log(`Total encoding time: ${totalEncodingTime.toFixed(2)}s`);
+                            console.log(`Average FPS: ${averageFps.toFixed(1)} fps`);
+
+                            // Calculate FPS for each 10% segment
+                            if (milestones.length > 0) {
+                                console.log('\nFPS per 10% segment:');
+
+                                let prevPercent = 0;
+                                let prevChunks = 0;
+                                let prevTime = videoEncodingStartTime;
+
+                                for (const milestone of milestones) {
+                                    const chunksDiff = milestone.chunks - prevChunks;
+                                    const timeDiff = (milestone.time - prevTime) / 1000; // seconds
+
+                                    // Guard against division by zero
+                                    if (timeDiff > 0) {
+                                        const segmentFps = chunksDiff / timeDiff;
+                                        console.log(`  ${prevPercent}%-${milestone.percent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
+                                    } else {
+                                        console.log(`  ${prevPercent}%-${milestone.percent}%: N/A (${chunksDiff} chunks in <0.01s)`);
+                                    }
+
+                                    prevPercent = milestone.percent;
+                                    prevChunks = milestone.chunks;
+                                    prevTime = milestone.time;
+                                }
+
+                                // Add final segment if not at 100% or if we have chunks after the last milestone
+                                const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10;
+                                if (prevPercent < 100 && totalVideoChunksReceived > prevChunks) {
+                                    const chunksDiff = totalVideoChunksReceived - prevChunks;
+                                    const timeDiff = (now - prevTime) / 1000;
+
+                                    // Guard against division by zero
+                                    if (timeDiff > 0) {
+                                        const segmentFps = chunksDiff / timeDiff;
+                                        const finalPercent = Math.min(100, currentPercent);
+                                        console.log(`  ${prevPercent}%-${finalPercent}%: ${segmentFps.toFixed(1)} fps (${chunksDiff} chunks in ${timeDiff.toFixed(2)}s)`);
+                                    } else {
+                                        const finalPercent = Math.min(100, currentPercent);
+                                        console.log(`  ${prevPercent}%-${finalPercent}%: N/A (${chunksDiff} chunks in <0.01s)`);
+                                    }
+                                }
+                            }
+                            console.log('====================================\n');
+                        } else {
+                            console.log('\n=== Encoding Performance Metrics ===');
+                            console.log('Encoding completed too quickly to measure (< 0.01s)');
+                            console.log('====================================\n');
+                        }
+                    }
+
+                    break;
                 }
             }
 
-            break;
+            // Wait for any pending chunks to finish writing
+            if (pendingVideoChunks > 0 || pendingAudioChunks > 0) {
+                console.log(`Waiting for pending chunks to finish: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
+                const pendingWaitStart = performance.now();
+                while ((pendingVideoChunks > 0 || pendingAudioChunks > 0) && (performance.now() - pendingWaitStart < 1000)) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+                if (pendingVideoChunks > 0 || pendingAudioChunks > 0) {
+                    console.warn(`Still have pending chunks after 1s wait: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
+                }
+            }
+
+            // Set progress to 100% when encoding is complete
+            onProgress(100);
+
+            // Mark muxer as finalized to prevent late encoder callbacks from adding chunks
+            // This MUST be set before calling muxer.finalize() to prevent race condition
+            muxerFinalized = true;
+
+            // Now safe to finalize - all chunks have been written
+            muxer.finalize();
+
+            if (fileStream) {
+                await fileStream.close();
+            } else {
+                // For browsers without File System Access API, trigger a download
+                const buffer = bufferTarget.buffer;
+                const blob = new Blob([buffer], { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = suggestedName;
+                a.click();
+                URL.revokeObjectURL(url);
+                console.log('File download triggered:', suggestedName);
+            }
         }
-    }
-
-    // Wait for any pending chunks to finish writing
-    if (pendingVideoChunks > 0 || pendingAudioChunks > 0) {
-        console.log(`Waiting for pending chunks to finish: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
-        const pendingWaitStart = performance.now();
-        while ((pendingVideoChunks > 0 || pendingAudioChunks > 0) && (performance.now() - pendingWaitStart < 1000)) {
-            await new Promise(resolve => setTimeout(resolve, 10));
-        }
-        if (pendingVideoChunks > 0 || pendingAudioChunks > 0) {
-            console.warn(`Still have pending chunks after 1s wait: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
-        }
-    }
-
-    // Set progress to 100% when encoding is complete
-    onProgress(100);
-
-    // Mark muxer as finalized to prevent late encoder callbacks from adding chunks
-    // This MUST be set before calling muxer.finalize() to prevent race condition
-    muxerFinalized = true;
-
-    // Now safe to finalize - all chunks have been written
-    muxer.finalize();
-
-    if (fileStream) {
-        await fileStream.close();
-    } else {
-        // For browsers without File System Access API, trigger a download
-        const buffer = bufferTarget.buffer;
-        const blob = new Blob([buffer], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = suggestedName;
-        a.click();
-        URL.revokeObjectURL(url);
-        console.log('File download triggered:', suggestedName);
-    }
-}
