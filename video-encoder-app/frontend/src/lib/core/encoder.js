@@ -23,7 +23,7 @@ const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
  * ブラウザ内でエンコードし、FileSystem APIへストリーム保存
  * @param {File} file
  * @param {{ video: { width:number, height:number, bitrate:number, framerate:number, framerateMode?:string, codec:string, container?:string }, audio?: { sampleRate:number, numberOfChannels:number, bitrate:number, codec:string } }} config
- * @param {(pct:number, stats?:{fps:number, elapsedMs:number, etaMs?:number})=>void} onProgress
+ * @param {(progress: {loading?: number, encoding?: number, overall?: number}, stats?:{fps:number, elapsedMs:number, etaMs?:number}, metadata?:any)=>void} onProgress
  * @param {AbortSignal} [signal] - Optional AbortSignal to cancel encoding
  * @returns {Promise<void>}
  */
@@ -159,7 +159,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
         hasAudioTrack = hasAudio && config.audio;
         
         // Pass metadata to the progress callback
-        onProgress(undefined, undefined, detectedFormat);
+        onProgress({}, undefined, detectedFormat);
         
         // Determine output framerate
         let outputFramerate = config.video.framerate;
@@ -428,7 +428,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 etaMs = estimatedTotalMs - elapsedMs;
             }
             
-            onProgress(encodingProgress, { fps, elapsedMs, etaMs });
+            // Calculate overall progress and separate encoding progress
+            const overallProgress = DEMUX_PROGRESS_PERCENTAGE + encodingProgress * (ENCODING_PROGRESS_PERCENTAGE / 100);
+            onProgress({ loading: 100, encoding: encodingProgress, overall: overallProgress }, { fps, elapsedMs, etaMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
     });
@@ -461,7 +463,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
         error: (e) => console.error('AudioDecoder error', e)
     });
 
-    const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => onProgress(pct));
+    const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => {
+        // Demuxing/loading progress (0-100% maps to 0-10% of overall progress)
+        const overallProgress = pct * (DEMUX_PROGRESS_PERCENTAGE / 100);
+        onProgress({ loading: pct, encoding: 0, overall: overallProgress });
+    });
 
     // Check if aborted after demuxing
     if (aborted || (signal && signal.aborted)) {
@@ -747,7 +753,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
     }
     
     // Set progress to 100% when encoding is complete
-    onProgress(100);
+    onProgress({ loading: 100, encoding: 100, overall: 100 });
     
     // Mark muxer as finalized to prevent late encoder callbacks from adding chunks
     // This MUST be set before calling muxer.finalize() to prevent race condition

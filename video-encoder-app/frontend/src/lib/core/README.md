@@ -22,6 +22,20 @@ Input MP4 File
 FileSystem API (output.mp4)
 ```
 
+### Progress Reporting
+
+The encoding process is divided into two phases with separate progress tracking:
+
+- **Loading Phase (0-10%)**: File reading and demuxing with MP4Box
+  - Important on Android where file reading can take significant time
+- **Encoding Phase (10-100%)**: Video/audio encoding with WebCodecs
+  - The main processing phase
+
+The UI displays three progress bars:
+1. **Loading Progress**: File reading and demuxing (0-100%)
+2. **Encoding Progress**: Actual encoding (0-100%)
+3. **Overall Progress**: Combined progress (0-100%)
+
 ## Files
 
 ### demuxer.js
@@ -44,7 +58,8 @@ Responsible for:
 - Configuring mp4-muxer with appropriate tracks
 - **Only creating audio track if source has audio** (the fix)
 - Writing encoded chunks to FileSystem API via mp4-muxer
-- Progress reporting
+- Progress reporting with separate loading and encoding progress
+- Reporting progress as `{loading, encoding, overall}` percentages
 
 **Key Feature**: Conditionally creates audio track based on `hasAudio` flag
 
@@ -109,11 +124,17 @@ const config = {
     }
 };
 
+// Progress callback now receives separate loading and encoding percentages
+await encodeToFile(file, config, (progress, stats) => {
+    // progress = { loading: 0-100, encoding: 0-100, overall: 0-100 }
+    console.log(`Loading: ${progress.loading}%, Encoding: ${progress.encoding}%, Overall: ${progress.overall}%`);
+    if (stats) {
+        console.log(`FPS: ${stats.fps}, Elapsed: ${stats.elapsedMs}ms`);
+    }
+});
+
 // If source has audio: Output will have video + audio
 // If source has NO audio: Output will have video only (no empty audio track)
-await encodeToFile(file, config, (progress, stats) => {
-    console.log(`Progress: ${progress}%`, stats);
-});
 ```
 
 ## Testing
