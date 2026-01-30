@@ -13,6 +13,8 @@
   let usePreset = true;
   let showDetailedSettings = false; // NEW: Track if detailed settings are visible
   let progressPct = 0;
+  let loadingProgressPct = 0; // Separate progress for file loading/demuxing
+  let encodingProgressPct = 0; // Separate progress for encoding
   let fps = 0;
   let elapsedMs = 0;
   let etaMs = 0;
@@ -22,6 +24,7 @@
   let message = '';
   let errorLogs: string[] = [];
   let showErrorLogs = false;
+  let showSeekWarning = false; // Warning for video seeking limitation
 
   // Browser compatibility detection
   let isFirefox = false;
@@ -122,6 +125,7 @@
     const input = e.target as HTMLInputElement;
     file = input.files?.[0] ?? null;
     sourceFileAnalyzed = false; // Reset analysis state when new file is picked
+    showSeekWarning = false; // Reset seek warning when new file is picked
     originalWidth = 0;
     originalHeight = 0;
     originalFramerate = 0;
@@ -501,8 +505,13 @@
       };
 
       const start = performance.now();
-      await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number, etaMs?: number }, metadata?: any) => {
-        if (pct !== undefined) progressPct = pct;
+      await encodeToFile(file, config, (progress?: {loading?: number, encoding?: number, overall?: number}, stats?: { fps: number, elapsedMs: number, etaMs?: number }, metadata?: any) => {
+        // Update separate progress bars
+        if (progress) {
+          if (progress.loading !== undefined) loadingProgressPct = progress.loading;
+          if (progress.encoding !== undefined) encodingProgressPct = progress.encoding;
+          if (progress.overall !== undefined) progressPct = progress.overall;
+        }
         if (stats) { 
           fps = stats.fps; 
           elapsedMs = stats.elapsedMs;
@@ -573,6 +582,12 @@
       const errorMessage = args.map(arg => 
         typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
       ).join(' ');
+      
+      // Check for BoxParser error that indicates video seeking limitation
+      if (/\[BoxParser\].*Box of type.*has a size.*greater than its container size/i.test(errorMessage)) {
+        // Set warning flag for seeking limitation
+        showSeekWarning = true;
+      }
       
       // Patterns for non-critical MP4Box errors to suppress
       const suppressPatterns = [
@@ -922,6 +937,25 @@
     </div>
   {/if}
 
+  <!-- Video seeking warning -->
+  {#if showSeekWarning}
+    <div class="browser-warning" style="border-color: #ff9800; background-color: #fff3e0;">
+      <div class="browser-warning-header">
+        <h3>⚠️ 動画ファイル警告</h3>
+        <button class="close-btn" on:click={() => showSeekWarning = false}>×</button>
+      </div>
+      <p>
+        <strong>この動画ファイルにはシーク情報の問題があります。</strong>
+      </p>
+      <p style="color: #e65100; font-weight: bold; margin-top: 8px;">
+        動画のシークができません
+      </p>
+      <p style="font-size: 14px; margin-top: 8px;">
+        エンコード処理は正常に完了しますが、出力された動画ファイルで特定の位置へのシーク（早送り・巻き戻し）が正常に動作しない可能性があります。
+      </p>
+    </div>
+  {/if}
+
   <div class="dropzone" on:click={() => document.getElementById('fileInput')?.click()}>
     <input type="file" id="fileInput" accept="video/mp4" on:change={pickFile} />
     <p>MP4ファイルをドラッグ&ドロップ または クリックして選択</p>
@@ -1185,8 +1219,27 @@
 
     {#if encoding}
       <div class="panel">
-        <div class="progress"><div style="width:{progressPct}%"></div></div>
-        <p>進捗: {Math.round(progressPct)}%</p>
+        <!-- Loading/Demuxing Progress -->
+        <div style="margin-bottom: 16px;">
+          <p style="margin-bottom: 4px; font-size: 14px; color: #666;">ファイル読み込み・解析</p>
+          <div class="progress"><div style="width:{loadingProgressPct}%"></div></div>
+          <p style="font-size: 13px;">読み込み進捗: {Math.round(loadingProgressPct)}%</p>
+        </div>
+        
+        <!-- Encoding Progress -->
+        <div style="margin-bottom: 16px;">
+          <p style="margin-bottom: 4px; font-size: 14px; color: #666;">エンコード処理</p>
+          <div class="progress"><div style="width:{encodingProgressPct}%"></div></div>
+          <p style="font-size: 13px;">エンコード進捗: {Math.round(encodingProgressPct)}%</p>
+        </div>
+        
+        <!-- Overall Progress -->
+        <div style="margin-bottom: 16px;">
+          <p style="margin-bottom: 4px; font-size: 14px; font-weight: bold;">全体進捗</p>
+          <div class="progress"><div style="width:{progressPct}%"></div></div>
+          <p style="font-size: 14px; font-weight: bold;">全体: {Math.round(progressPct)}%</p>
+        </div>
+        
         <p>FPS: {fps > 0 ? fps.toFixed(1) : '-'} | 経過: {(elapsedMs/1000).toFixed(1)}s</p>
         {#if etaMs > 0 && progressPct < 100}
           <p>推定残り時間: {(etaMs/1000).toFixed(1)}s</p>
