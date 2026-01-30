@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { encodeToFile } from './lib/core/encoder.js';
   import { loadPresets } from './lib/presets.js';
   import { roundToValidAACBitrate } from './lib/utils/audioUtils.js';
@@ -483,23 +483,26 @@
 
       const start = performance.now();
       await encodeToFile(file, config, (pct?: number, stats?: { fps: number, elapsedMs: number, etaMs?: number }, metadata?: any) => {
-        if (pct !== undefined) progressPct = pct;
-        if (stats) { 
-          fps = stats.fps; 
-          elapsedMs = stats.elapsedMs;
-          etaMs = stats.etaMs ?? 0;
-        }
-        // Capture source file metadata when available
-        if (metadata && metadata.videoFormat && !sourceFileAnalyzed) {
-          originalWidth = metadata.videoFormat.width || 0;
-          originalHeight = metadata.videoFormat.height || 0;
-          originalFramerate = metadata.videoFormat.framerate || 0;
-          originalVideoBitrate = metadata.videoFormat.bitrate || 0;
-          if (metadata.audioFormat) {
-            originalAudioBitrate = metadata.audioFormat.bitrate || 0;
+        // Use untrack to avoid "reactive context" warning when updating state from async callback
+        untrack(() => {
+          if (pct !== undefined) progressPct = pct;
+          if (stats) { 
+            fps = stats.fps; 
+            elapsedMs = stats.elapsedMs;
+            etaMs = stats.etaMs ?? 0;
           }
-          sourceFileAnalyzed = true;
-        }
+          // Capture source file metadata when available
+          if (metadata && metadata.videoFormat && !sourceFileAnalyzed) {
+            originalWidth = metadata.videoFormat.width || 0;
+            originalHeight = metadata.videoFormat.height || 0;
+            originalFramerate = metadata.videoFormat.framerate || 0;
+            originalVideoBitrate = metadata.videoFormat.bitrate || 0;
+            if (metadata.audioFormat) {
+              originalAudioBitrate = metadata.audioFormat.bitrate || 0;
+            }
+            sourceFileAnalyzed = true;
+          }
+        });
       }, abortController.signal);
 
       const end = performance.now();

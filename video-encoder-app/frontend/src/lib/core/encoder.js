@@ -590,14 +590,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             
             lastTotalVideoChunks = totalVideoChunksReceived;
             lastTotalAudioChunks = totalAudioChunksReceived;
-            
-            // Log progress periodically to avoid performance impact from excessive logging
-            // Only log every 100 chunks OR every 2 seconds (whichever comes first)
-            // Note: Excessive console.log can slow down encoding significantly
-            if (totalVideoChunksReceived % 100 === 0 || (now - lastLogTime > 2000)) {
-                console.log(`New chunks arrived: video=${totalVideoChunksReceived}, audio=${totalAudioChunksReceived}, resetting idle timer`);
-                lastLogTime = now;
-            }
+            lastLogTime = now;
             continue;
         }
         
