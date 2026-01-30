@@ -45,11 +45,15 @@
   
   // Resolution settings
   let resolutionMode = 'preset'; // 'preset', 'manual', 'width-only', 'height-only', 'original'
-  let resolutionPreset = '1080p';
+  let resolutionPreset = '1920';
   let manualWidth = 1920;
   let manualHeight = 1080;
   let widthOnly = 1920;
   let heightOnly = 1080;
+  
+  // Computed output resolution
+  let outputWidth = 0;
+  let outputHeight = 0;
   
   // Frame rate settings
   let framerateMode = 'manual'; // 'original', 'manual'
@@ -111,15 +115,66 @@
     estimatedVideoBitrate = calculateBitrate(true);
     estimatedAudioBitrate = calculateBitrate(false);
   }
+  
+  // Calculate output resolution
+  $: {
+    if (!sourceFileAnalyzed || originalWidth === 0 || originalHeight === 0) {
+      outputWidth = 0;
+      outputHeight = 0;
+    } else if (resolutionMode === 'original') {
+      outputWidth = originalWidth;
+      outputHeight = originalHeight;
+    } else if (resolutionMode === 'preset') {
+      const preset = resolutionPresets[resolutionPreset];
+      if (preset) {
+        const dims = calculateDimensionsFromLongestEdge(preset.longestEdge, originalWidth, originalHeight);
+        outputWidth = dims.width;
+        outputHeight = dims.height;
+      }
+    } else if (resolutionMode === 'manual') {
+      outputWidth = manualWidth;
+      outputHeight = manualHeight;
+    } else if (resolutionMode === 'width-only') {
+      outputWidth = widthOnly;
+      outputHeight = Math.round((widthOnly / originalWidth) * originalHeight);
+      // Ensure even number
+      if (outputHeight % 2 !== 0) outputHeight = outputHeight - 1;
+    } else if (resolutionMode === 'height-only') {
+      outputWidth = Math.round((heightOnly / originalHeight) * originalWidth);
+      outputHeight = heightOnly;
+      // Ensure even number
+      if (outputWidth % 2 !== 0) outputWidth = outputWidth - 1;
+    }
+  }
 
+  // Resolution presets based on longest edge
   const resolutionPresets = {
-    '2160p': { width: 3840, height: 2160 },
-    '1440p': { width: 2560, height: 1440 },
-    '1080p': { width: 1920, height: 1080 },
-    '720p': { width: 1280, height: 720 },
-    '480p': { width: 854, height: 480 },
-    '360p': { width: 640, height: 360 }
+    '3840': { longestEdge: 3840, label: '3840 (4K)' },
+    '2560': { longestEdge: 2560, label: '2560 (1440p)' },
+    '1920': { longestEdge: 1920, label: '1920 (1080p)' },
+    '1280': { longestEdge: 1280, label: '1280 (720p)' },
+    '854': { longestEdge: 854, label: '854 (480p)' },
+    '640': { longestEdge: 640, label: '640 (360p)' }
   };
+  
+  // Helper function to calculate dimensions from longest edge
+  function calculateDimensionsFromLongestEdge(longestEdge: number, sourceWidth: number, sourceHeight: number): { width: number, height: number } {
+    const isLandscape = sourceWidth >= sourceHeight;
+    const aspectRatio = sourceWidth / sourceHeight;
+    
+    if (isLandscape) {
+      // For landscape videos, longest edge is width
+      const width = longestEdge;
+      const height = Math.round(longestEdge / aspectRatio);
+      return { width, height: height % 2 === 0 ? height : height - 1 }; // Ensure even number
+    } else {
+      // For portrait videos, longest edge is height
+      // width = height * (width/height) = height * aspectRatio
+      const height = longestEdge;
+      const width = Math.round(longestEdge * aspectRatio);
+      return { width: width % 2 === 0 ? width : width - 1, height }; // Ensure even number
+    }
+  }
 
   const pickFile = async (e: Event) => {
     const input = e.target as HTMLInputElement;
@@ -299,9 +354,12 @@
         let targetHeight = originalHeight;
         
         if (resolutionMode === 'preset') {
-          const res = resolutionPresets[resolutionPreset];
-          targetWidth = res.width;
-          targetHeight = res.height;
+          const preset = resolutionPresets[resolutionPreset];
+          if (preset) {
+            const dims = calculateDimensionsFromLongestEdge(preset.longestEdge, originalWidth, originalHeight);
+            targetWidth = dims.width;
+            targetHeight = dims.height;
+          }
         } else if (resolutionMode === 'manual') {
           targetWidth = manualWidth;
           targetHeight = manualHeight;
@@ -407,12 +465,70 @@
         manualHeight = preset.height;
         framerateMode = 'manual';
         
-        // Find matching preset resolution
-        const matchingPreset = Object.entries(resolutionPresets).find(
-          ([_, res]) => res.width === preset.width && res.height === preset.height
-        );
-        if (matchingPreset) {
-          resolutionPreset = matchingPreset[0];
+        // Find matching preset resolution based on longest edge
+        // Calculate the longest edge from the preset's width and height
+        const presetLongestEdge = Math.max(preset.width, preset.height);
+        
+        // Check if this would be an upscale when source file is analyzed
+        if (sourceFileAnalyzed && originalWidth > 0 && originalHeight > 0) {
+          const sourceMaxEdge = Math.max(originalWidth, originalHeight);
+          
+          // If preset would upscale, find the largest allowed preset instead
+          if (presetLongestEdge > sourceMaxEdge) {
+            // Find the largest preset that doesn't exceed source resolution
+            let bestKey = '640'; // minimum fallback
+            let bestEdge = 640;
+            
+            for (const [key, res] of Object.entries(resolutionPresets)) {
+              if (res.longestEdge <= sourceMaxEdge && res.longestEdge > bestEdge) {
+                bestKey = key;
+                bestEdge = res.longestEdge;
+              }
+            }
+            resolutionPreset = bestKey;
+          } else {
+            // Find the matching preset (no upscaling needed)
+            const matchingPreset = Object.entries(resolutionPresets).find(
+              ([_, res]) => res.longestEdge === presetLongestEdge
+            );
+            if (matchingPreset) {
+              resolutionPreset = matchingPreset[0];
+            } else {
+              // If no exact match, find the closest one that doesn't upscale
+              let closestKey = '640';
+              let closestDiff = Infinity;
+              for (const [key, res] of Object.entries(resolutionPresets)) {
+                if (res.longestEdge <= sourceMaxEdge) {
+                  const diff = Math.abs(res.longestEdge - presetLongestEdge);
+                  if (diff < closestDiff) {
+                    closestDiff = diff;
+                    closestKey = key;
+                  }
+                }
+              }
+              resolutionPreset = closestKey;
+            }
+          }
+        } else {
+          // Source file not analyzed yet, apply preset as-is
+          const matchingPreset = Object.entries(resolutionPresets).find(
+            ([_, res]) => res.longestEdge === presetLongestEdge
+          );
+          if (matchingPreset) {
+            resolutionPreset = matchingPreset[0];
+          } else {
+            // If no exact match, find the closest one
+            let closestKey = '1920'; // default
+            let closestDiff = Infinity;
+            for (const [key, res] of Object.entries(resolutionPresets)) {
+              const diff = Math.abs(res.longestEdge - presetLongestEdge);
+              if (diff < closestDiff) {
+                closestDiff = diff;
+                closestKey = key;
+              }
+            }
+            resolutionPreset = closestKey;
+          }
         }
       }
     }
@@ -433,7 +549,7 @@
     videoCodec = 'avc1.640028';
     audioCodec = 'mp4a.40.2';
     resolutionMode = 'preset';
-    resolutionPreset = '1080p';
+    resolutionPreset = '1920';
     manualWidth = 1920;
     manualHeight = 1080;
     widthOnly = 1920;
@@ -469,9 +585,16 @@
         width = undefined;
         height = undefined;
       } else if (resolutionMode === 'preset') {
-        const res = resolutionPresets[resolutionPreset];
-        width = res.width;
-        height = res.height;
+        const preset = resolutionPresets[resolutionPreset];
+        if (preset && sourceFileAnalyzed && originalWidth > 0 && originalHeight > 0) {
+          const dims = calculateDimensionsFromLongestEdge(preset.longestEdge, originalWidth, originalHeight);
+          width = dims.width;
+          height = dims.height;
+        } else {
+          // Fallback if file not analyzed yet
+          width = 1920;
+          height = 1080;
+        }
       } else if (resolutionMode === 'manual') {
         width = manualWidth;
         height = manualHeight;
@@ -979,6 +1102,48 @@
   {/if}
 
   {#if presets.length > 0}
+    <!-- File Information Section -->
+    {#if sourceFileAnalyzed && file}
+      <div class="panel">
+        <h3 class="section-title">ファイル情報</h3>
+        <div style="color: #666; font-size: 13px; padding: 8px 0;">
+          <p style="margin: 4px 0;"><strong>入力解像度:</strong> {originalWidth} × {originalHeight}px</p>
+          <p style="margin: 4px 0;"><strong>フレームレート:</strong> {originalFramerate.toFixed(1)}fps</p>
+          {#if originalVideoBitrate > 0}
+            <p style="margin: 4px 0;"><strong>映像ビットレート:</strong> {(originalVideoBitrate / 1000000).toFixed(1)}Mbps</p>
+          {/if}
+          {#if originalAudioBitrate > 0}
+            <p style="margin: 4px 0;"><strong>音声ビットレート:</strong> {(originalAudioBitrate / 1000).toFixed(0)}Kbps</p>
+          {/if}
+        </div>
+        {#if outputWidth > 0 && outputHeight > 0}
+          <div style="color: #2196F3; font-size: 13px; padding: 8px 0; border-top: 1px solid #e0e0e0; margin-top: 8px;">
+            <p style="margin: 4px 0;"><strong>出力解像度:</strong> {outputWidth} × {outputHeight}px</p>
+            <p style="margin: 4px 0;"><strong>出力コンテナ:</strong> {containerFormat.toUpperCase()}</p>
+            <p style="margin: 4px 0;"><strong>出力映像コーデック:</strong> {
+              videoCodec.startsWith('avc1.64') ? 'H.264 High' :
+              videoCodec.startsWith('avc1.4d') ? 'H.264 Main' :
+              videoCodec.startsWith('avc1.42') ? 'H.264 Baseline' :
+              videoCodec.startsWith('hev1') ? 'H.265 (hev1)' :
+              videoCodec.startsWith('hvc1') ? 'H.265 (hvc1)' :
+              videoCodec.startsWith('vp09') ? 'VP9' :
+              videoCodec.startsWith('av01') ? 'AV1' :
+              videoCodec
+            }</p>
+            <p style="margin: 4px 0;"><strong>出力音声コーデック:</strong> {
+              audioCodec === 'mp4a.40.2' ? 'AAC-LC' :
+              audioCodec === 'mp4a.40.5' ? 'AAC-HE' :
+              audioCodec === 'opus' ? 'Opus' :
+              audioCodec
+            }</p>
+            <p style="margin: 4px 0;"><strong>出力映像ビットレート:</strong> {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps</p>
+            <p style="margin: 4px 0;"><strong>出力音声ビットレート:</strong> {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps</p>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Preset Selection -->
     <div class="panel preset-toggle">
       <div class="row">
         <label>プリセット:</label>
@@ -1106,7 +1271,7 @@
     </div>
 
     {#if showDetailedSettings}
-      <!-- Required Settings -->
+      <!-- Detailed Settings -->
       <div class="panel">
         <h3 class="section-title">詳細設定</h3>
         
@@ -1132,7 +1297,7 @@
           <label>解像度モード:</label>
           <select bind:value={resolutionMode}>
             <option value="original">元の解像度を保持</option>
-            <option value="preset">プリセット</option>
+            <option value="preset">長辺プリセット</option>
             <option value="manual">手動指定(幅×高さ)</option>
             <option value="width-only">幅のみ指定</option>
             <option value="height-only">高さのみ指定</option>
@@ -1141,26 +1306,25 @@
 
         {#if resolutionMode === 'preset'}
           <div class="row">
-            <label>解像度プリセット:</label>
+            <label>長辺プリセット:</label>
             <select bind:value={resolutionPreset}>
-              <option value="2160p" disabled={sourceFileAnalyzed && (originalWidth < 3840 || originalHeight < 2160)}>
-                4K (3840×2160) {sourceFileAnalyzed && (originalWidth < 3840 || originalHeight < 2160) ? '(元ファイルより大きい)' : ''}
-              </option>
-              <option value="1440p" disabled={sourceFileAnalyzed && (originalWidth < 2560 || originalHeight < 1440)}>
-                1440p (2560×1440) {sourceFileAnalyzed && (originalWidth < 2560 || originalHeight < 1440) ? '(元ファイルより大きい)' : ''}
-              </option>
-              <option value="1080p" disabled={sourceFileAnalyzed && (originalWidth < 1920 || originalHeight < 1080)}>
-                1080p (1920×1080) {sourceFileAnalyzed && (originalWidth < 1920 || originalHeight < 1080) ? '(元ファイルより大きい)' : ''}
-              </option>
-              <option value="720p" disabled={sourceFileAnalyzed && (originalWidth < 1280 || originalHeight < 720)}>
-                720p (1280×720) {sourceFileAnalyzed && (originalWidth < 1280 || originalHeight < 720) ? '(元ファイルより大きい)' : ''}
-              </option>
-              <option value="480p">480p (854×480)</option>
-              <option value="360p">360p (640×360)</option>
+              {#each Object.entries(resolutionPresets) as [key, preset]}
+                {#if sourceFileAnalyzed && originalWidth > 0 && originalHeight > 0}
+                  {@const maxEdge = Math.max(originalWidth, originalHeight)}
+                  {@const isUpscale = preset.longestEdge > maxEdge}
+                  <option value={key} disabled={isUpscale}>
+                    {preset.label} {isUpscale ? '(元ファイルより大きい)' : ''}
+                  </option>
+                {:else}
+                  <option value={key}>{preset.label}</option>
+                {/if}
+              {/each}
             </select>
           </div>
           {#if sourceFileAnalyzed && resolutionPresets[resolutionPreset]}
-            {#if resolutionPresets[resolutionPreset].width > originalWidth || resolutionPresets[resolutionPreset].height > originalHeight}
+            {@const maxEdge = Math.max(originalWidth, originalHeight)}
+            {@const isUpscale = resolutionPresets[resolutionPreset].longestEdge > maxEdge}
+            {#if isUpscale}
               <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ 選択した解像度は元ファイルより大きいため、画質が劣化する可能性があります</p>
             {/if}
           {/if}
