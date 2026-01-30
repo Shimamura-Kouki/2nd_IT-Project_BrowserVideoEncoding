@@ -18,17 +18,39 @@ WebCodecs APIを使用したブラウザ完結型の動画エンコードアプ�
 
 - **フレームワーク**: Svelte 5.x
 - **言語**: TypeScript/JavaScript
-- **ビルドツール**: Vite
-- **動画処理**: WebCodecs API (ネイティブ)
-- **ファイルシステム**: FileSystem Access API (ネイティブ)
-- **Muxing**: `mp4-muxer` v3.x
-- **Demuxing**: `mp4box.js` v0.5.x
-- **WebM出力**: `webm-muxer` v5.x
+- **ビルドツール**: Vite 7.x
+- **パッケージマネージャー**: npm
+
+### 使用ライブラリ
+
+- **mp4-muxer** v3.x - MP4コンテナ生成
+- **mp4box.js** v0.5.x - MP4コンテナ解析・デマックス
+- **webm-muxer** v5.x - WebMコンテナ生成
+- **@sveltejs/vite-plugin-svelte** v6.x - ViteのSvelteプラグイン
+
+### 使用ブラウザAPI
+
+- **WebCodecs API** - ハードウェアアクセラレーテッド動画・音声エンコード/デコード
+  - `VideoEncoder` - 映像エンコード
+  - `VideoDecoder` - 映像デコード
+  - `AudioEncoder` - 音声エンコード
+  - `AudioDecoder` - 音声デコード
+  - `VideoFrame` - 映像フレーム処理
+  - `AudioData` - 音声データ処理
+  - `EncodedVideoChunk` - エンコード済み映像データ
+  - `EncodedAudioChunk` - エンコード済み音声データ
+- **FileSystem Access API** - ローカルファイルシステムへの直接書き込み
+  - `showSaveFilePicker()` - ファイル保存ダイアログ
+  - `FileSystemWritableFileStream` - ストリーム書き込み
+- **File API** - ファイル読み込み
+  - `FileReader` - ファイルデータ読み取り
+  - `Blob` - バイナリデータ処理
+- **Web Workers API** - （間接的に使用、ブラウザの内部処理）
 
 ### コーデック対応
 
 - **映像**: H.264 (AVC), VP9, AV1 (ブラウザサポートに依存)
-- **音声**: AAC, Opus
+- **音声**: AAC (AAC-LC), Opus
 - **コンテナ**: MP4, WebM
 
 ## アーキテクチャ
@@ -76,6 +98,21 @@ WebCodecs APIを使用したブラウザ完結型の動画エンコードアプ�
   - エンコード処理が不安定で、エラーが発生する可能性
   - ファイルの読み込みに問題が発生する場合がある
   - **使用は推奨しません。Chrome または Edge をご使用ください**
+
+#### 🧪 動作検証済みプラットフォーム
+
+以下のプラットフォームで動作検証を実施しています：
+
+- **Windows**
+  - Google Chrome
+  - Firefox（非推奨：既知の問題あり）
+- **Android**
+  - Google Chrome
+- **iPad**
+  - Safari（非推奨：既知の問題あり）
+
+> **注意**: 上記以外のプラットフォーム・ブラウザでも動作する可能性がありますが、動作保証はありません。
+> 最適な体験のため、Windows/Mac/LinuxでGoogle ChromeまたはMicrosoft Edgeの最新版をご使用ください。
 
 
 ### セットアップ手順
