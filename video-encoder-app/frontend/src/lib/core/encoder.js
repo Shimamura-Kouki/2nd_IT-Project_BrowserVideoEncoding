@@ -249,7 +249,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     width: outputWidth, 
                     height: outputHeight 
                 },
-                firstTimestampBehavior: 'offset'
+                firstTimestampBehavior: 'offset',
+                streaming: false  // Disable streaming mode to enable proper seeking and duration storage
             };
             
             if (hasAudio && config.audio && audioFormat) {
