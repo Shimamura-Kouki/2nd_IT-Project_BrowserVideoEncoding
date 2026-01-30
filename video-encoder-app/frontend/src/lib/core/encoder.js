@@ -348,9 +348,18 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     }
                 },
                 error: (e) => {
-                    console.error('AudioEncoder error', e);
+                    console.error('AudioEncoder error:', e);
                     // Mark that we should not wait for audio encoder if it has errors
                     hasAudioTrack = false;
+                    // Clean up the audio encoder
+                    if (audioEncoder && audioEncoder.state !== 'closed') {
+                        try {
+                            audioEncoder.close();
+                        } catch (closeError) {
+                            console.error('Error closing audio encoder:', closeError);
+                        }
+                    }
+                    audioEncoder = null;
                 }
             });
 
@@ -376,6 +385,14 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 console.error('Failed to configure audio encoder:', audioEncoderConfigError);
                 console.warn(`Continuing without audio encoding. Codec ${config.audio.codec} may not be supported by this browser.`);
                 hasAudioTrack = false;
+                // Clean up the audio encoder
+                if (audioEncoder && audioEncoder.state !== 'closed') {
+                    try {
+                        audioEncoder.close();
+                    } catch (closeError) {
+                        console.error('Error closing audio encoder:', closeError);
+                    }
+                }
                 audioEncoder = null;
             }
         }
@@ -430,6 +447,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
             console.error('AudioDecoder error:', e);
             // Mark that we should not wait for audio encoder if decoder has errors
             hasAudioTrack = false;
+            // Clean up the audio encoder since decoder failed
+            if (audioEncoder && audioEncoder.state !== 'closed') {
+                try {
+                    audioEncoder.close();
+                } catch (closeError) {
+                    console.error('Error closing audio encoder after decoder error:', closeError);
+                }
+            }
+            audioEncoder = null;
         }
     });
 
