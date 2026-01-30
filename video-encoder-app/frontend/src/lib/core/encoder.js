@@ -2,6 +2,7 @@ import { Muxer as MP4Muxer, FileSystemWritableFileStreamTarget as MP4Target, Arr
 import { Muxer as WebMMuxer, FileSystemWritableFileStreamTarget as WebMTarget, ArrayBufferTarget as WebMArrayBufferTarget } from 'webm-muxer';
 import { demuxAndDecode } from './demuxer.js';
 import { validateAudioBitrate, isAACCodec } from '../utils/audioUtils.js';
+import { KEYFRAME_INTERVAL_SECONDS } from '../constants.js';
 
 // Helper class to unify ArrayBufferTarget interface between mp4-muxer and webm-muxer
 class ArrayBufferTarget {
@@ -318,7 +319,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
             height: outputHeight,
             bitrate: config.video.bitrate,
             framerate: outputFramerate,
-            latencyMode: 'quality'
+            latencyMode: 'quality',
+            keyInterval: Math.max(1, Math.round(outputFramerate * KEYFRAME_INTERVAL_SECONDS))
         });
 
         if (hasAudio && config.audio && audioFormat) {
