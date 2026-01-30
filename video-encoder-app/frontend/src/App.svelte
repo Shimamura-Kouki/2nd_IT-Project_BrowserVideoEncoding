@@ -427,10 +427,14 @@
 
   async function startEncoding() {
     if (!file) return;
-    message = '';
-    errorLogs = []; // Clear error logs when starting new encoding
-    encoding = true;
-    paused = false;
+    
+    // Wrap initial state updates in untrack to avoid reactive context warnings in async function
+    untrack(() => {
+      message = '';
+      errorLogs = []; // Clear error logs when starting new encoding
+      encoding = true;
+      paused = false;
+    });
     abortController = new AbortController();
     
     try {
@@ -513,25 +517,34 @@
         avg_fps: fps
       };
 
-      message = `エンコードが完了しました (処理時間: ${result.process_time_ms}ms, 平均FPS: ${result.avg_fps.toFixed(1)})`;
+      // Wrap state update after await in untrack
+      untrack(() => {
+        message = `エンコードが完了しました (処理時間: ${result.process_time_ms}ms, 平均FPS: ${result.avg_fps.toFixed(1)})`;
+      });
     } catch (error: any) {
       // Handle errors, including AbortError when user cancels file save dialog or stops encoding
-      if (error.name === 'AbortError') {
-        if (abortController?.signal.aborted) {
-          message = 'エンコードが中止されました';
-          console.log('Encoding was stopped by user');
+      // Wrap state updates in catch block with untrack
+      untrack(() => {
+        if (error.name === 'AbortError') {
+          if (abortController?.signal.aborted) {
+            message = 'エンコードが中止されました';
+            console.log('Encoding was stopped by user');
+          } else {
+            message = 'ファイル保存がキャンセルされました';
+            console.log('User cancelled file save dialog');
+          }
         } else {
-          message = 'ファイル保存がキャンセルされました';
-          console.log('User cancelled file save dialog');
+          message = `エラーが発生しました: ${error.message}`;
+          console.error('Encoding error:', error);
         }
-      } else {
-        message = `エラーが発生しました: ${error.message}`;
-        console.error('Encoding error:', error);
-      }
+      });
     } finally {
       // Always reset encoding state to allow user to retry
-      encoding = false;
-      paused = false;
+      // Wrap state updates in finally block with untrack
+      untrack(() => {
+        encoding = false;
+        paused = false;
+      });
       abortController = null;
     }
   }
