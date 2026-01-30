@@ -250,11 +250,16 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     height: outputHeight 
                 },
                 firstTimestampBehavior: 'offset'
-                // Note: No streaming parameter specified
-                // - streaming:true creates clusters but NO cues → seeking broken
-                // - streaming:false/undefined creates cues but one cluster → slow seeking
-                // Trade-off: Slow seeking is better than no seeking capability
-                // This is a known limitation of webm-muxer with FileSystemWritableFileStreamTarget
+                // Note: No streaming parameter specified (uses default behavior)
+                // 
+                // webm-muxer v5.x limitation with FileSystemWritableFileStreamTarget:
+                // - Default (no streaming param): Writes cues for seeking, but buffers into
+                //   large clusters. Results in slow seeking but it works.
+                // - streaming:true: Creates clusters immediately but does NOT write cues.
+                //   Results in completely broken seeking (INPUT_CONTROL_SET_POSITION fails).
+                //
+                // Trade-off: We prioritize working (but slow) seeking over broken seeking.
+                // For better seeking performance, users should use MP4 container instead.
             };
             
             if (hasAudio && config.audio && audioFormat) {
