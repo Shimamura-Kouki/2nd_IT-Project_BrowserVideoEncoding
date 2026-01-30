@@ -27,6 +27,9 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         // - Progressive loading triggers re-parsing of file structure
         // - Corrupt or non-standard MP4 files are being processed
         let readyCallbackFired = false;
+        // Error tracking for MP4Box parsing
+        let parsingErrorCount = 0;
+        const MAX_PARSING_ERRORS = 10; // Maximum number of parsing errors before aborting
 
         mp4boxfile.onReady = (info) => {
             // Guard against multiple onReady events
@@ -140,6 +143,20 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             mp4boxfile.start();
         };
 
+        // Add error handler for MP4Box parsing errors
+        mp4boxfile.onError = (e) => {
+            parsingErrorCount++;
+            console.error(`MP4Box parsing error (${parsingErrorCount}/${MAX_PARSING_ERRORS}):`, e);
+            
+            // If we've exceeded the maximum number of parsing errors, reject the promise
+            if (parsingErrorCount >= MAX_PARSING_ERRORS) {
+                const errorMsg = 'Too many MP4Box parsing errors. The file may be corrupted or in an unsupported format.';
+                console.error(errorMsg);
+                reject(new Error(errorMsg));
+            }
+            // Otherwise, continue processing - some errors are recoverable
+        };
+
     mp4boxfile.onSamples = (track_id, _user, samples) => {
         if (track_id === videoTrackId) {
             for (const sample of samples) {
@@ -169,19 +186,24 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
     const reader = new FileReader();
 
     reader.onload = (e) => {
-        const buffer = e.target.result;
-        buffer.fileStart = offset;
-        mp4boxfile.appendBuffer(buffer);
-        offset += buffer.byteLength;
-        // Demuxing should contribute only a portion of total progress
-        // The remaining will be for encoding
-        const demuxProgress = Math.min(DEMUX_PROGRESS_PERCENTAGE, (offset / file.size) * DEMUX_PROGRESS_PERCENTAGE);
-        onProgress(demuxProgress);
-        if (offset < file.size) {
-            readNextChunk();
-        } else {
-            mp4boxfile.flush();
-            resolve({ hasAudio });
+        try {
+            const buffer = e.target.result;
+            buffer.fileStart = offset;
+            mp4boxfile.appendBuffer(buffer);
+            offset += buffer.byteLength;
+            // Demuxing should contribute only a portion of total progress
+            // The remaining will be for encoding
+            const demuxProgress = Math.min(DEMUX_PROGRESS_PERCENTAGE, (offset / file.size) * DEMUX_PROGRESS_PERCENTAGE);
+            onProgress(demuxProgress);
+            if (offset < file.size) {
+                readNextChunk();
+            } else {
+                mp4boxfile.flush();
+                resolve({ hasAudio });
+            }
+        } catch (error) {
+            console.error('Error processing file chunk:', error);
+            reject(new Error(`Failed to process file chunk: ${error.message}`));
         }
     };
 
