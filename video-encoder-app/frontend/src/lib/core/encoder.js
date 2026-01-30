@@ -482,12 +482,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
     
     if (audioEncoder && audioEncoder.state === 'configured') {
         try {
-            // Only flush if encoder has processed frames
-            if (totalAudioChunksReceived > 0) {
-                await audioEncoder.flush();
-            } else {
-                console.warn('Skipping audio encoder flush: no audio chunks were encoded');
-            }
+            // Flush encoder to finalize all queued audio frames
+            // Note: AudioEncoder output callbacks are asynchronous, so totalAudioChunksReceived
+            // may still be 0 even if frames have been queued. Always flush if encoder is configured.
+            await audioEncoder.flush();
         } catch (e) {
             console.error('AudioEncoder flush error:', e);
         }
