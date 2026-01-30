@@ -178,7 +178,8 @@
         
         mp4boxfile.onError = (e: any) => {
           analysisErrorCount++;
-          console.error(`MP4Box analysis error (${analysisErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, e);
+          // Use console.warn for recoverable errors during analysis
+          console.warn(`MP4Box analysis warning (${analysisErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, e);
           
           // If too many errors occur during analysis, mark analysis as failed
           // but still allow the file to be selected (demuxer will try again)
@@ -567,15 +568,29 @@
     // Intercept console.error to capture error logs
     const originalConsoleError = console.error;
     console.error = function(...args) {
-      // Call original console.error
-      originalConsoleError.apply(console, args);
-      
-      // Add to error logs with timestamp
-      const timestamp = new Date().toLocaleTimeString('ja-JP');
+      // Filter out non-critical MP4Box parsing errors
+      // These are recoverable errors that don't affect encoding success
       const errorMessage = args.map(arg => 
         typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
       ).join(' ');
-      errorLogs = [...errorLogs, `[${timestamp}] ${errorMessage}`];
+      
+      // Patterns for non-critical MP4Box errors to suppress
+      const suppressPatterns = [
+        /\[BoxParser\].*Box of type.*has a size.*greater than its container size/i,
+        /\[BoxParser\].*box.*size/i
+      ];
+      
+      const shouldSuppress = suppressPatterns.some(pattern => pattern.test(errorMessage));
+      
+      if (!shouldSuppress) {
+        // Call original console.error for non-suppressed errors
+        originalConsoleError.apply(console, args);
+        
+        // Add to error logs with timestamp
+        const timestamp = new Date().toLocaleTimeString('ja-JP');
+        errorLogs = [...errorLogs, `[${timestamp}] ${errorMessage}`];
+      }
+      // Suppressed errors are silently ignored as they're recoverable
     };
     
     // Cleanup: restore original console.error when component is destroyed

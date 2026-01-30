@@ -146,7 +146,8 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         // Add error handler for MP4Box parsing errors
         mp4boxfile.onError = (e) => {
             parsingErrorCount++;
-            console.error(`MP4Box parsing error (${parsingErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, e);
+            // Use console.warn for recoverable errors to avoid cluttering error logs
+            console.warn(`MP4Box parsing warning (${parsingErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, e);
             
             // If we've exceeded the maximum number of parsing errors, reject the promise
             if (parsingErrorCount >= MAX_MP4BOX_PARSING_ERRORS) {
@@ -204,10 +205,11 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         } catch (error) {
             // Increment error counter for consistency with onError handler
             parsingErrorCount++;
-            console.error(`Error processing file chunk (${parsingErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, error);
+            console.warn(`Warning processing file chunk (${parsingErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, error);
             
             // Use same error threshold as async errors for consistent behavior
             if (parsingErrorCount >= MAX_MP4BOX_PARSING_ERRORS) {
+                console.error(`Failed to process file chunk: ${error.message}`);
                 reject(new Error(`Failed to process file chunk: ${error.message}`));
             } else {
                 // Try to continue with next chunk if we haven't exceeded threshold
