@@ -45,11 +45,15 @@
   
   // Resolution settings
   let resolutionMode = 'preset'; // 'preset', 'manual', 'width-only', 'height-only', 'original'
-  let resolutionPreset = '1080p';
+  let resolutionPreset = '1920';
   let manualWidth = 1920;
   let manualHeight = 1080;
   let widthOnly = 1920;
   let heightOnly = 1080;
+  
+  // Computed output resolution
+  let outputWidth = 0;
+  let outputHeight = 0;
   
   // Frame rate settings
   let framerateMode = 'manual'; // 'original', 'manual'
@@ -111,15 +115,63 @@
     estimatedVideoBitrate = calculateBitrate(true);
     estimatedAudioBitrate = calculateBitrate(false);
   }
+  
+  // Calculate output resolution
+  $: {
+    if (!sourceFileAnalyzed || originalWidth === 0 || originalHeight === 0) {
+      outputWidth = 0;
+      outputHeight = 0;
+    } else if (resolutionMode === 'original') {
+      outputWidth = originalWidth;
+      outputHeight = originalHeight;
+    } else if (resolutionMode === 'preset') {
+      const preset = resolutionPresets[resolutionPreset];
+      if (preset) {
+        const dims = calculateDimensionsFromLongestEdge(preset.longestEdge, originalWidth, originalHeight);
+        outputWidth = dims.width;
+        outputHeight = dims.height;
+      }
+    } else if (resolutionMode === 'manual') {
+      outputWidth = manualWidth;
+      outputHeight = manualHeight;
+    } else if (resolutionMode === 'width-only') {
+      outputWidth = widthOnly;
+      outputHeight = Math.round((widthOnly / originalWidth) * originalHeight);
+      // Ensure even number
+      if (outputHeight % 2 !== 0) outputHeight = outputHeight - 1;
+    } else if (resolutionMode === 'height-only') {
+      outputWidth = Math.round((heightOnly / originalHeight) * originalWidth);
+      outputHeight = heightOnly;
+      // Ensure even number
+      if (outputWidth % 2 !== 0) outputWidth = outputWidth - 1;
+    }
+  }
 
+  // Resolution presets based on longest edge
   const resolutionPresets = {
-    '2160p': { width: 3840, height: 2160 },
-    '1440p': { width: 2560, height: 1440 },
-    '1080p': { width: 1920, height: 1080 },
-    '720p': { width: 1280, height: 720 },
-    '480p': { width: 854, height: 480 },
-    '360p': { width: 640, height: 360 }
+    '3840': { longestEdge: 3840, label: '3840 (4K)' },
+    '2560': { longestEdge: 2560, label: '2560 (1440p)' },
+    '1920': { longestEdge: 1920, label: '1920 (1080p)' },
+    '1280': { longestEdge: 1280, label: '1280 (720p)' },
+    '854': { longestEdge: 854, label: '854 (480p)' },
+    '640': { longestEdge: 640, label: '640 (360p)' }
   };
+  
+  // Helper function to calculate dimensions from longest edge
+  function calculateDimensionsFromLongestEdge(longestEdge: number, sourceWidth: number, sourceHeight: number): { width: number, height: number } {
+    const isLandscape = sourceWidth >= sourceHeight;
+    const aspectRatio = sourceWidth / sourceHeight;
+    
+    if (isLandscape) {
+      const width = longestEdge;
+      const height = Math.round(longestEdge / aspectRatio);
+      return { width, height: height % 2 === 0 ? height : height - 1 }; // Ensure even number
+    } else {
+      const height = longestEdge;
+      const width = Math.round(longestEdge * aspectRatio);
+      return { width: width % 2 === 0 ? width : width - 1, height }; // Ensure even number
+    }
+  }
 
   const pickFile = async (e: Event) => {
     const input = e.target as HTMLInputElement;
@@ -299,9 +351,12 @@
         let targetHeight = originalHeight;
         
         if (resolutionMode === 'preset') {
-          const res = resolutionPresets[resolutionPreset];
-          targetWidth = res.width;
-          targetHeight = res.height;
+          const preset = resolutionPresets[resolutionPreset];
+          if (preset) {
+            const dims = calculateDimensionsFromLongestEdge(preset.longestEdge, originalWidth, originalHeight);
+            targetWidth = dims.width;
+            targetHeight = dims.height;
+          }
         } else if (resolutionMode === 'manual') {
           targetWidth = manualWidth;
           targetHeight = manualHeight;
@@ -433,7 +488,7 @@
     videoCodec = 'avc1.640028';
     audioCodec = 'mp4a.40.2';
     resolutionMode = 'preset';
-    resolutionPreset = '1080p';
+    resolutionPreset = '1920';
     manualWidth = 1920;
     manualHeight = 1080;
     widthOnly = 1920;
@@ -469,9 +524,16 @@
         width = undefined;
         height = undefined;
       } else if (resolutionMode === 'preset') {
-        const res = resolutionPresets[resolutionPreset];
-        width = res.width;
-        height = res.height;
+        const preset = resolutionPresets[resolutionPreset];
+        if (preset && sourceFileAnalyzed && originalWidth > 0 && originalHeight > 0) {
+          const dims = calculateDimensionsFromLongestEdge(preset.longestEdge, originalWidth, originalHeight);
+          width = dims.width;
+          height = dims.height;
+        } else {
+          // Fallback if file not analyzed yet
+          width = 1920;
+          height = 1080;
+        }
       } else if (resolutionMode === 'manual') {
         width = manualWidth;
         height = manualHeight;
@@ -979,6 +1041,29 @@
   {/if}
 
   {#if presets.length > 0}
+    <!-- File Information Section -->
+    {#if sourceFileAnalyzed && file}
+      <div class="panel">
+        <h3 class="section-title">ファイル情報</h3>
+        <div style="color: #666; font-size: 13px; padding: 8px 0;">
+          <p style="margin: 4px 0;"><strong>入力解像度:</strong> {originalWidth} × {originalHeight}px</p>
+          <p style="margin: 4px 0;"><strong>フレームレート:</strong> {originalFramerate.toFixed(1)}fps</p>
+          {#if originalVideoBitrate > 0}
+            <p style="margin: 4px 0;"><strong>映像ビットレート:</strong> {(originalVideoBitrate / 1000000).toFixed(1)}Mbps</p>
+          {/if}
+          {#if originalAudioBitrate > 0}
+            <p style="margin: 4px 0;"><strong>音声ビットレート:</strong> {(originalAudioBitrate / 1000).toFixed(0)}Kbps</p>
+          {/if}
+        </div>
+        {#if outputWidth > 0 && outputHeight > 0}
+          <div style="color: #2196F3; font-size: 13px; padding: 8px 0; border-top: 1px solid #e0e0e0; margin-top: 8px;">
+            <p style="margin: 4px 0;"><strong>出力解像度:</strong> {outputWidth} × {outputHeight}px</p>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Preset Selection -->
     <div class="panel preset-toggle">
       <div class="row">
         <label>プリセット:</label>
@@ -988,101 +1073,6 @@
           {/each}
         </select>
       </div>
-      
-      <div class="row">
-        <label>コーデック:</label>
-        <select bind:value={videoCodec} style="flex: 1;">
-          <optgroup label="H.264 (AVC)">
-            <option value="avc1.640028">H.264 High (最高画質・互換性良)</option>
-            <option value="avc1.4d001f">H.264 Main (高画質・互換性最良)</option>
-            <option value="avc1.42001f">H.264 Baseline L3.1 (標準画質・旧デバイス対応)</option>
-            <option value="avc1.42001e">H.264 Baseline L3.0 (低解像度・最高互換性)</option>
-          </optgroup>
-          <optgroup label="H.265 (HEVC)">
-            <option value="hev1.1.6.L93.B0">H.265 Main (高効率・新デバイス)</option>
-            <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 (Apple互換性向上)</option>
-          </optgroup>
-          <optgroup label="VP9">
-            <option value="vp09.00.31.08">VP9 Profile 0 (WebM標準)</option>
-            <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (高解像度対応)</option>
-          </optgroup>
-          <optgroup label="AV1">
-            <option value="av01.0.05M.08">AV1 Main L3.1 (最新・高効率)</option>
-            <option value="av01.0.04M.08">AV1 Main L3.0 (標準解像度)</option>
-          </optgroup>
-        </select>
-      </div>
-      
-      <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
-        {#if videoCodec.startsWith('avc1.64')}
-          High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能
-        {:else if videoCodec.startsWith('avc1.4d')}
-          Main: バランスの良いH.264プロファイル。互換性が最も高い
-        {:else if videoCodec === 'avc1.42001f'}
-          Baseline L3.1: 標準画質のH.264。旧デバイスとの互換性重視
-        {:else if videoCodec === 'avc1.42001e'}
-          Baseline L3.0: 低解像度向けH.264。最高の互換性
-        {:else if videoCodec.startsWith('hev1')}
-          H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要
-        {:else if videoCodec.startsWith('hvc1')}
-          H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上
-        {:else if videoCodec.startsWith('vp09')}
-          VP9: Googleが開発した高効率コーデック。WebMコンテナで使用
-        {:else if videoCodec.startsWith('av01')}
-          AV1: 最新の高効率コーデック。H.264の約30%のサイズで同等画質
-        {/if}
-      </p>
-      
-      <div class="row">
-        <label>ビットレート品質:</label>
-        <select bind:value={qualityLevel}>
-          <option value="最高">最高 (元ファイルと同等)</option>
-          <option value="高">高 (元の80%)</option>
-          <option value="中">中 (元の60%) - 推奨</option>
-          <option value="低">低 (元の40%)</option>
-          <option value="最低">最低 (元の25%)</option>
-          <option value="カスタム">カスタム</option>
-        </select>
-      </div>
-
-      {#if qualityLevel !== 'カスタム'}
-        <div class="row">
-          <label>音声品質:</label>
-          <select bind:value={audioQualityLevel}>
-            <option value="最高">最高 (192Kbps)</option>
-            <option value="高">高 (160Kbps)</option>
-            <option value="中">中 (128Kbps) - 推奨</option>
-            <option value="低">低 (96Kbps)</option>
-            <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
-          </select>
-        </div>
-      {/if}
-
-      {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
-        <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
-          推定ビットレート: 映像 {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps / 音声 {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
-          {#if videoCodec.startsWith('vp09')}
-            (VP9コーデックにより最適化)
-          {:else if videoCodec.startsWith('av01')}
-            (AV1コーデックにより最適化)
-          {/if}
-          {#if audioCodec.startsWith('mp4a')}
-            <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
-          {/if}
-        </p>
-      {/if}
-
-      {#if qualityLevel === 'カスタム'}
-        <div class="row">
-          <label>映像ビットレート (Kbps):</label>
-          <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
-        </div>
-
-        <div class="row">
-          <label>音声ビットレート (Kbps):</label>
-          <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
-        </div>
-      {/if}
       
       <div class="row">
         <button 
@@ -1106,9 +1096,53 @@
     </div>
 
     {#if showDetailedSettings}
-      <!-- Required Settings -->
+      <!-- Encoding Settings Section -->
       <div class="panel">
-        <h3 class="section-title">詳細設定</h3>
+        <h3 class="section-title">エンコード設定</h3>
+        
+        <div class="row">
+          <label>映像コーデック:</label>
+          <select bind:value={videoCodec} style="flex: 1;">
+            <optgroup label="H.264 (AVC)">
+              <option value="avc1.640028">H.264 High (最高画質・互換性良)</option>
+              <option value="avc1.4d001f">H.264 Main (高画質・互換性最良)</option>
+              <option value="avc1.42001f">H.264 Baseline L3.1 (標準画質・旧デバイス対応)</option>
+              <option value="avc1.42001e">H.264 Baseline L3.0 (低解像度・最高互換性)</option>
+            </optgroup>
+            <optgroup label="H.265 (HEVC)">
+              <option value="hev1.1.6.L93.B0">H.265 Main (高効率・新デバイス)</option>
+              <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 (Apple互換性向上)</option>
+            </optgroup>
+            <optgroup label="VP9">
+              <option value="vp09.00.31.08">VP9 Profile 0 (WebM標準)</option>
+              <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (高解像度対応)</option>
+            </optgroup>
+            <optgroup label="AV1">
+              <option value="av01.0.05M.08">AV1 Main L3.1 (最新・高効率)</option>
+              <option value="av01.0.04M.08">AV1 Main L3.0 (標準解像度)</option>
+            </optgroup>
+          </select>
+        </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {#if videoCodec.startsWith('avc1.64')}
+            High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能
+          {:else if videoCodec.startsWith('avc1.4d')}
+            Main: バランスの良いH.264プロファイル。互換性が最も高い
+          {:else if videoCodec === 'avc1.42001f'}
+            Baseline L3.1: 標準画質のH.264。旧デバイスとの互換性重視
+          {:else if videoCodec === 'avc1.42001e'}
+            Baseline L3.0: 低解像度向けH.264。最高の互換性
+          {:else if videoCodec.startsWith('hev1')}
+            H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要
+          {:else if videoCodec.startsWith('hvc1')}
+            H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上
+          {:else if videoCodec.startsWith('vp09')}
+            VP9: Googleが開発した高効率コーデック。WebMコンテナで使用
+          {:else if videoCodec.startsWith('av01')}
+            AV1: 最新の高効率コーデック。H.264の約30%のサイズで同等画質
+          {/if}
+        </p>
         
         <div class="row">
           <label>音声コーデック:</label>
@@ -1127,12 +1161,70 @@
             <option value="webm">WebM</option>
           </select>
         </div>
+        
+        <div class="row">
+          <label>映像品質:</label>
+          <select bind:value={qualityLevel}>
+            <option value="最高">最高 (元ファイルと同等)</option>
+            <option value="高">高 (元の80%)</option>
+            <option value="中">中 (元の60%) - 推奨</option>
+            <option value="低">低 (元の40%)</option>
+            <option value="最低">最低 (元の25%)</option>
+            <option value="カスタム">カスタム</option>
+          </select>
+        </div>
 
+        {#if qualityLevel === 'カスタム'}
+          <div class="row">
+            <label>映像ビットレート (Kbps):</label>
+            <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
+          </div>
+        {:else if sourceFileAnalyzed}
+          <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
+            推定映像ビットレート: {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps
+            {#if videoCodec.startsWith('vp09')}
+              (VP9コーデックにより最適化)
+            {:else if videoCodec.startsWith('av01')}
+              (AV1コーデックにより最適化)
+            {/if}
+          </p>
+        {/if}
+        
+        <div class="row">
+          <label>音声品質:</label>
+          <select bind:value={audioQualityLevel}>
+            <option value="最高">最高 (192Kbps)</option>
+            <option value="高">高 (160Kbps)</option>
+            <option value="中">中 (128Kbps) - 推奨</option>
+            <option value="低">低 (96Kbps)</option>
+            <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
+          </select>
+        </div>
+
+        {#if qualityLevel === 'カスタム'}
+          <div class="row">
+            <label>音声ビットレート (Kbps):</label>
+            <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
+          </div>
+        {:else if sourceFileAnalyzed}
+          <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
+            推定音声ビットレート: {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
+            {#if audioCodec.startsWith('mp4a')}
+              <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
+            {/if}
+          </p>
+        {/if}
+      </div>
+
+      <!-- Resolution Settings Section -->
+      <div class="panel">
+        <h3 class="section-title">解像度設定</h3>
+        
         <div class="row">
           <label>解像度モード:</label>
           <select bind:value={resolutionMode}>
             <option value="original">元の解像度を保持</option>
-            <option value="preset">プリセット</option>
+            <option value="preset">長辺プリセット</option>
             <option value="manual">手動指定(幅×高さ)</option>
             <option value="width-only">幅のみ指定</option>
             <option value="height-only">高さのみ指定</option>
@@ -1141,26 +1233,25 @@
 
         {#if resolutionMode === 'preset'}
           <div class="row">
-            <label>解像度プリセット:</label>
+            <label>長辺サイズ:</label>
             <select bind:value={resolutionPreset}>
-              <option value="2160p" disabled={sourceFileAnalyzed && (originalWidth < 3840 || originalHeight < 2160)}>
-                4K (3840×2160) {sourceFileAnalyzed && (originalWidth < 3840 || originalHeight < 2160) ? '(元ファイルより大きい)' : ''}
-              </option>
-              <option value="1440p" disabled={sourceFileAnalyzed && (originalWidth < 2560 || originalHeight < 1440)}>
-                1440p (2560×1440) {sourceFileAnalyzed && (originalWidth < 2560 || originalHeight < 1440) ? '(元ファイルより大きい)' : ''}
-              </option>
-              <option value="1080p" disabled={sourceFileAnalyzed && (originalWidth < 1920 || originalHeight < 1080)}>
-                1080p (1920×1080) {sourceFileAnalyzed && (originalWidth < 1920 || originalHeight < 1080) ? '(元ファイルより大きい)' : ''}
-              </option>
-              <option value="720p" disabled={sourceFileAnalyzed && (originalWidth < 1280 || originalHeight < 720)}>
-                720p (1280×720) {sourceFileAnalyzed && (originalWidth < 1280 || originalHeight < 720) ? '(元ファイルより大きい)' : ''}
-              </option>
-              <option value="480p">480p (854×480)</option>
-              <option value="360p">360p (640×360)</option>
+              {#each Object.entries(resolutionPresets) as [key, preset]}
+                {#if sourceFileAnalyzed && originalWidth > 0 && originalHeight > 0}
+                  {@const maxEdge = Math.max(originalWidth, originalHeight)}
+                  {@const isUpscale = preset.longestEdge > maxEdge}
+                  <option value={key} disabled={isUpscale}>
+                    {preset.label} {isUpscale ? '(元ファイルより大きい)' : ''}
+                  </option>
+                {:else}
+                  <option value={key}>{preset.label}</option>
+                {/if}
+              {/each}
             </select>
           </div>
           {#if sourceFileAnalyzed && resolutionPresets[resolutionPreset]}
-            {#if resolutionPresets[resolutionPreset].width > originalWidth || resolutionPresets[resolutionPreset].height > originalHeight}
+            {@const maxEdge = Math.max(originalWidth, originalHeight)}
+            {@const isUpscale = resolutionPresets[resolutionPreset].longestEdge > maxEdge}
+            {#if isUpscale}
               <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ 選択した解像度は元ファイルより大きいため、画質が劣化する可能性があります</p>
             {/if}
           {/if}
@@ -1186,7 +1277,12 @@
             <p style="color: #999; font-size: 12px;">幅は元の比率から自動計算されます</p>
           </div>
         {/if}
+      </div>
 
+      <!-- Framerate Settings Section -->
+      <div class="panel">
+        <h3 class="section-title">フレームレート設定</h3>
+        
         <div class="row">
           <label>フレームレートモード:</label>
           <select bind:value={framerateMode}>
