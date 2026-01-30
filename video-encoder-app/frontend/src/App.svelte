@@ -1078,6 +1078,101 @@
       </div>
       
       <div class="row">
+        <label>コーデック:</label>
+        <select bind:value={videoCodec} style="flex: 1;">
+          <optgroup label="H.264 (AVC)">
+            <option value="avc1.640028">H.264 High (最高画質・互換性良)</option>
+            <option value="avc1.4d001f">H.264 Main (高画質・互換性最良)</option>
+            <option value="avc1.42001f">H.264 Baseline L3.1 (標準画質・旧デバイス対応)</option>
+            <option value="avc1.42001e">H.264 Baseline L3.0 (低解像度・最高互換性)</option>
+          </optgroup>
+          <optgroup label="H.265 (HEVC)">
+            <option value="hev1.1.6.L93.B0">H.265 Main (高効率・新デバイス)</option>
+            <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 (Apple互換性向上)</option>
+          </optgroup>
+          <optgroup label="VP9">
+            <option value="vp09.00.31.08">VP9 Profile 0 (WebM標準)</option>
+            <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (高解像度対応)</option>
+          </optgroup>
+          <optgroup label="AV1">
+            <option value="av01.0.05M.08">AV1 Main L3.1 (最新・高効率)</option>
+            <option value="av01.0.04M.08">AV1 Main L3.0 (標準解像度)</option>
+          </optgroup>
+        </select>
+      </div>
+      
+      <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+        {#if videoCodec.startsWith('avc1.64')}
+          High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能
+        {:else if videoCodec.startsWith('avc1.4d')}
+          Main: バランスの良いH.264プロファイル。互換性が最も高い
+        {:else if videoCodec === 'avc1.42001f'}
+          Baseline L3.1: 標準画質のH.264。旧デバイスとの互換性重視
+        {:else if videoCodec === 'avc1.42001e'}
+          Baseline L3.0: 低解像度向けH.264。最高の互換性
+        {:else if videoCodec.startsWith('hev1')}
+          H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要
+        {:else if videoCodec.startsWith('hvc1')}
+          H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上
+        {:else if videoCodec.startsWith('vp09')}
+          VP9: Googleが開発した高効率コーデック。WebMコンテナで使用
+        {:else if videoCodec.startsWith('av01')}
+          AV1: 最新の高効率コーデック。H.264の約30%のサイズで同等画質
+        {/if}
+      </p>
+      
+      <div class="row">
+        <label>ビットレート品質:</label>
+        <select bind:value={qualityLevel}>
+          <option value="最高">最高 (元ファイルと同等)</option>
+          <option value="高">高 (元の80%)</option>
+          <option value="中">中 (元の60%) - 推奨</option>
+          <option value="低">低 (元の40%)</option>
+          <option value="最低">最低 (元の25%)</option>
+          <option value="カスタム">カスタム</option>
+        </select>
+      </div>
+
+      {#if qualityLevel !== 'カスタム'}
+        <div class="row">
+          <label>音声品質:</label>
+          <select bind:value={audioQualityLevel}>
+            <option value="最高">最高 (192Kbps)</option>
+            <option value="高">高 (160Kbps)</option>
+            <option value="中">中 (128Kbps) - 推奨</option>
+            <option value="低">低 (96Kbps)</option>
+            <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
+          </select>
+        </div>
+      {/if}
+
+      {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
+        <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
+          推定ビットレート: 映像 {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps / 音声 {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
+          {#if videoCodec.startsWith('vp09')}
+            (VP9コーデックにより最適化)
+          {:else if videoCodec.startsWith('av01')}
+            (AV1コーデックにより最適化)
+          {/if}
+          {#if audioCodec.startsWith('mp4a')}
+            <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
+          {/if}
+        </p>
+      {/if}
+
+      {#if qualityLevel === 'カスタム'}
+        <div class="row">
+          <label>映像ビットレート (Kbps):</label>
+          <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
+        </div>
+
+        <div class="row">
+          <label>音声ビットレート (Kbps):</label>
+          <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
+        </div>
+      {/if}
+      
+      <div class="row">
         <button 
           type="button" 
           on:click={toggleDetailedSettings} 
@@ -1099,53 +1194,9 @@
     </div>
 
     {#if showDetailedSettings}
-      <!-- Encoding Settings Section -->
+      <!-- Detailed Settings -->
       <div class="panel">
-        <h3 class="section-title">エンコード設定</h3>
-        
-        <div class="row">
-          <label>映像コーデック:</label>
-          <select bind:value={videoCodec} style="flex: 1;">
-            <optgroup label="H.264 (AVC)">
-              <option value="avc1.640028">H.264 High (最高画質・互換性良)</option>
-              <option value="avc1.4d001f">H.264 Main (高画質・互換性最良)</option>
-              <option value="avc1.42001f">H.264 Baseline L3.1 (標準画質・旧デバイス対応)</option>
-              <option value="avc1.42001e">H.264 Baseline L3.0 (低解像度・最高互換性)</option>
-            </optgroup>
-            <optgroup label="H.265 (HEVC)">
-              <option value="hev1.1.6.L93.B0">H.265 Main (高効率・新デバイス)</option>
-              <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 (Apple互換性向上)</option>
-            </optgroup>
-            <optgroup label="VP9">
-              <option value="vp09.00.31.08">VP9 Profile 0 (WebM標準)</option>
-              <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (高解像度対応)</option>
-            </optgroup>
-            <optgroup label="AV1">
-              <option value="av01.0.05M.08">AV1 Main L3.1 (最新・高効率)</option>
-              <option value="av01.0.04M.08">AV1 Main L3.0 (標準解像度)</option>
-            </optgroup>
-          </select>
-        </div>
-        
-        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
-          {#if videoCodec.startsWith('avc1.64')}
-            High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能
-          {:else if videoCodec.startsWith('avc1.4d')}
-            Main: バランスの良いH.264プロファイル。互換性が最も高い
-          {:else if videoCodec === 'avc1.42001f'}
-            Baseline L3.1: 標準画質のH.264。旧デバイスとの互換性重視
-          {:else if videoCodec === 'avc1.42001e'}
-            Baseline L3.0: 低解像度向けH.264。最高の互換性
-          {:else if videoCodec.startsWith('hev1')}
-            H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要
-          {:else if videoCodec.startsWith('hvc1')}
-            H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上
-          {:else if videoCodec.startsWith('vp09')}
-            VP9: Googleが開発した高効率コーデック。WebMコンテナで使用
-          {:else if videoCodec.startsWith('av01')}
-            AV1: 最新の高効率コーデック。H.264の約30%のサイズで同等画質
-          {/if}
-        </p>
+        <h3 class="section-title">詳細設定</h3>
         
         <div class="row">
           <label>音声コーデック:</label>
@@ -1164,65 +1215,7 @@
             <option value="webm">WebM</option>
           </select>
         </div>
-        
-        <div class="row">
-          <label>映像品質:</label>
-          <select bind:value={qualityLevel}>
-            <option value="最高">最高 (元ファイルと同等)</option>
-            <option value="高">高 (元の80%)</option>
-            <option value="中">中 (元の60%) - 推奨</option>
-            <option value="低">低 (元の40%)</option>
-            <option value="最低">最低 (元の25%)</option>
-            <option value="カスタム">カスタム</option>
-          </select>
-        </div>
 
-        {#if qualityLevel === 'カスタム'}
-          <div class="row">
-            <label>映像ビットレート (Kbps):</label>
-            <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
-          </div>
-        {:else if sourceFileAnalyzed}
-          <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
-            推定映像ビットレート: {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps
-            {#if videoCodec.startsWith('vp09')}
-              (VP9コーデックにより最適化)
-            {:else if videoCodec.startsWith('av01')}
-              (AV1コーデックにより最適化)
-            {/if}
-          </p>
-        {/if}
-        
-        <div class="row">
-          <label>音声品質:</label>
-          <select bind:value={audioQualityLevel}>
-            <option value="最高">最高 (192Kbps)</option>
-            <option value="高">高 (160Kbps)</option>
-            <option value="中">中 (128Kbps) - 推奨</option>
-            <option value="低">低 (96Kbps)</option>
-            <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
-          </select>
-        </div>
-
-        {#if qualityLevel === 'カスタム'}
-          <div class="row">
-            <label>音声ビットレート (Kbps):</label>
-            <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
-          </div>
-        {:else if sourceFileAnalyzed}
-          <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
-            推定音声ビットレート: {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
-            {#if audioCodec.startsWith('mp4a')}
-              <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
-            {/if}
-          </p>
-        {/if}
-      </div>
-
-      <!-- Resolution Settings Section -->
-      <div class="panel">
-        <h3 class="section-title">解像度設定</h3>
-        
         <div class="row">
           <label>解像度モード:</label>
           <select bind:value={resolutionMode}>
@@ -1280,12 +1273,7 @@
             <p style="color: #999; font-size: 12px;">幅は元の比率から自動計算されます</p>
           </div>
         {/if}
-      </div>
 
-      <!-- Framerate Settings Section -->
-      <div class="panel">
-        <h3 class="section-title">フレームレート設定</h3>
-        
         <div class="row">
           <label>フレームレートモード:</label>
           <select bind:value={framerateMode}>
