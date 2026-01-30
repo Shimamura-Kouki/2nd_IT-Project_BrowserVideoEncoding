@@ -35,134 +35,153 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         const originalConsoleError = console.error;
         const suppressBoxParserWarnings = (...args) => {
             // Filter out BoxParser size validation warnings which are expected during progressive loading
-            const message = args.join(' ');
-            if (message.includes('[BoxParser]') && message.includes('greater than its container size')) {
-                return; // Suppress this expected warning
+            // Only check if first argument is a string to avoid false positives with objects
+            if (typeof args[0] === 'string') {
+                const message = args[0];
+                if (message.includes('[BoxParser]') && message.includes('greater than its container size')) {
+                    return; // Suppress this expected warning
+                }
             }
             originalConsoleError.apply(console, args);
         };
+        
+        // Cleanup function to restore console.error in all exit paths
+        const cleanup = () => {
+            console.error = originalConsoleError;
+        };
+        
         console.error = suppressBoxParserWarnings;
 
         mp4boxfile.onReady = (info) => {
-            // Guard against multiple onReady events
-            if (readyCallbackFired) {
-                console.warn('mp4boxfile.onReady fired multiple times - ignoring subsequent call');
-                return;
-            }
-            readyCallbackFired = true;
-            
-            const videoTrack = info.videoTracks?.[0];
-            const audioTrack = info.audioTracks?.[0];
-            let detectedVideoFormat = null;
-            
-            // First, determine audio bitrate to use in video bitrate calculation
-            let audioBitrate = null;
-            if (audioTrack && audioDecoder) {
-                hasAudio = true;
-                audioTrackId = audioTrack.id;
-                
-                // Calculate audio bitrate
-                if (audioTrack.bitrate) {
-                    audioBitrate = audioTrack.bitrate;
-                } else {
-                    // Rough estimate for common audio formats when bitrate is not available
-                    audioBitrate = 128000; // default estimate
+            try {
+                // Guard against multiple onReady events
+                if (readyCallbackFired) {
+                    console.warn('mp4boxfile.onReady fired multiple times - ignoring subsequent call');
+                    return;
                 }
+                readyCallbackFired = true;
                 
-                detectedAudioFormat = {
-                    sampleRate: audioTrack.audio.sample_rate,
-                    numberOfChannels: audioTrack.audio.channel_count,
-                    bitrate: audioBitrate
-                };
-                audioDecoder.configure({
-                    codec: audioTrack.codec,
-                    sampleRate: audioTrack.audio.sample_rate,
-                    numberOfChannels: audioTrack.audio.channel_count
-                });
-                mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
-            }
-            
-            if (videoTrack) {
-                videoTrackId = videoTrack.id;
-                // Calculate total frames from track info
-                totalFrames = videoTrack.nb_samples ?? 0;
+                const videoTrack = info.videoTracks?.[0];
+                const audioTrack = info.audioTracks?.[0];
+                let detectedVideoFormat = null;
                 
-                // Calculate video bitrate from track info
-                let videoBitrate = null;
-                if (videoTrack.bitrate) {
-                    videoBitrate = videoTrack.bitrate;
-                } else if (videoTrack.movie_duration && info.size) {
-                    // Estimate from file size and duration
-                    const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
-                    const totalBitrate = Math.round((info.size * 8) / durationSec);
-                    // Subtract audio bitrate and estimated container overhead
-                    const containerOverhead = totalBitrate * CONTAINER_OVERHEAD_PERCENTAGE;
-                    const estimatedAudioBitrate = audioBitrate || 0;
-                    videoBitrate = Math.round(totalBitrate - estimatedAudioBitrate - containerOverhead);
-                    // Ensure video bitrate is at least positive
-                    if (videoBitrate < MINIMUM_VIDEO_BITRATE) {
-                        videoBitrate = MINIMUM_VIDEO_BITRATE;
+                // First, determine audio bitrate to use in video bitrate calculation
+                let audioBitrate = null;
+                if (audioTrack && audioDecoder) {
+                    hasAudio = true;
+                    audioTrackId = audioTrack.id;
+                    
+                    // Calculate audio bitrate
+                    if (audioTrack.bitrate) {
+                        audioBitrate = audioTrack.bitrate;
+                    } else {
+                        // Rough estimate for common audio formats when bitrate is not available
+                        audioBitrate = 128000; // default estimate
                     }
+                    
+                    detectedAudioFormat = {
+                        sampleRate: audioTrack.audio.sample_rate,
+                        numberOfChannels: audioTrack.audio.channel_count,
+                        bitrate: audioBitrate
+                    };
+                    audioDecoder.configure({
+                        codec: audioTrack.codec,
+                        sampleRate: audioTrack.audio.sample_rate,
+                        numberOfChannels: audioTrack.audio.channel_count
+                    });
+                    mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
                 }
                 
-                detectedVideoFormat = {
-                    width: videoTrack.video.width,
-                    height: videoTrack.video.height,
-                    codec: videoTrack.codec,
-                    framerate: videoTrack.movie_duration && videoTrack.nb_samples 
-                        ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
-                        : null,
-                    bitrate: videoBitrate
-                };
-                const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
-                const description = generateDescriptionBuffer(entry);
-                videoDecoder.configure({
-                    codec: videoTrack.codec,
-                    codedWidth: videoTrack.video.width,
-                    codedHeight: videoTrack.video.height,
-                    description
+                if (videoTrack) {
+                    videoTrackId = videoTrack.id;
+                    // Calculate total frames from track info
+                    totalFrames = videoTrack.nb_samples ?? 0;
+                    
+                    // Calculate video bitrate from track info
+                    let videoBitrate = null;
+                    if (videoTrack.bitrate) {
+                        videoBitrate = videoTrack.bitrate;
+                    } else if (videoTrack.movie_duration && info.size) {
+                        // Estimate from file size and duration
+                        const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
+                        const totalBitrate = Math.round((info.size * 8) / durationSec);
+                        // Subtract audio bitrate and estimated container overhead
+                        const containerOverhead = totalBitrate * CONTAINER_OVERHEAD_PERCENTAGE;
+                        const estimatedAudioBitrate = audioBitrate || 0;
+                        videoBitrate = Math.round(totalBitrate - estimatedAudioBitrate - containerOverhead);
+                        // Ensure video bitrate is at least positive
+                        if (videoBitrate < MINIMUM_VIDEO_BITRATE) {
+                            videoBitrate = MINIMUM_VIDEO_BITRATE;
+                        }
+                    }
+                    
+                    detectedVideoFormat = {
+                        width: videoTrack.video.width,
+                        height: videoTrack.video.height,
+                        codec: videoTrack.codec,
+                        framerate: videoTrack.movie_duration && videoTrack.nb_samples 
+                            ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
+                            : null,
+                        bitrate: videoBitrate
+                    };
+                    const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
+                    const description = generateDescriptionBuffer(entry);
+                    videoDecoder.configure({
+                        codec: videoTrack.codec,
+                        codedWidth: videoTrack.video.width,
+                        codedHeight: videoTrack.video.height,
+                        description
+                    });
+                    mp4boxfile.setExtractionOptions(videoTrackId, 'video', { nbSamples: 100 });
+                }
+
+                // Call the onReady callback to initialize encoders and muxer with detected format
+                onReady({
+                    hasAudio,
+                    audioFormat: detectedAudioFormat,
+                    videoFormat: detectedVideoFormat,
+                    totalFrames
                 });
-                mp4boxfile.setExtractionOptions(videoTrackId, 'video', { nbSamples: 100 });
+
+                mp4boxfile.start();
+            } catch (error) {
+                cleanup();
+                reject(error);
             }
-
-            // Call the onReady callback to initialize encoders and muxer with detected format
-            onReady({
-                hasAudio,
-                audioFormat: detectedAudioFormat,
-                videoFormat: detectedVideoFormat,
-                totalFrames
-            });
-
-            mp4boxfile.start();
         };
 
         mp4boxfile.onError = (e) => {
-            console.error = originalConsoleError; // Restore console.error
-            originalConsoleError('MP4Box error during demuxing:', e);
+            cleanup(); // Restore console.error first
+            console.error('MP4Box error during demuxing:', e);
             reject(new Error(`Failed to parse MP4 file: ${e}`));
         };
 
     mp4boxfile.onSamples = (track_id, _user, samples) => {
-        if (track_id === videoTrackId) {
-            for (const sample of samples) {
-                const chunk = new EncodedVideoChunk({
-                    type: sample.is_sync ? 'key' : 'delta',
-                    timestamp: Math.round(1e6 * sample.cts / sample.timescale),
-                    duration: Math.round(1e6 * sample.duration / sample.timescale),
-                    data: sample.data
-                });
-                videoDecoder.decode(chunk);
+        try {
+            if (track_id === videoTrackId) {
+                for (const sample of samples) {
+                    const chunk = new EncodedVideoChunk({
+                        type: sample.is_sync ? 'key' : 'delta',
+                        timestamp: Math.round(1e6 * sample.cts / sample.timescale),
+                        duration: Math.round(1e6 * sample.duration / sample.timescale),
+                        data: sample.data
+                    });
+                    videoDecoder.decode(chunk);
+                }
+            } else if (track_id === audioTrackId) {
+                for (const sample of samples) {
+                    const chunk = new EncodedAudioChunk({
+                        type: 'key',
+                        timestamp: Math.round(1e6 * sample.cts / sample.timescale),
+                        duration: Math.round(1e6 * sample.duration / sample.timescale),
+                        data: sample.data
+                    });
+                    audioDecoder.decode(chunk);
+                }
             }
-        } else if (track_id === audioTrackId) {
-            for (const sample of samples) {
-                const chunk = new EncodedAudioChunk({
-                    type: 'key',
-                    timestamp: Math.round(1e6 * sample.cts / sample.timescale),
-                    duration: Math.round(1e6 * sample.duration / sample.timescale),
-                    data: sample.data
-                });
-                audioDecoder.decode(chunk);
-            }
+        } catch (error) {
+            cleanup();
+            reject(error);
         }
     };
 
@@ -183,13 +202,13 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             readNextChunk();
         } else {
             mp4boxfile.flush();
-            console.error = originalConsoleError; // Restore console.error
+            cleanup(); // Restore console.error
             resolve({ hasAudio });
         }
     };
 
     reader.onerror = () => {
-        console.error = originalConsoleError; // Restore console.error
+        cleanup(); // Restore console.error
         reject(new Error('Failed to read file'));
     };
 
