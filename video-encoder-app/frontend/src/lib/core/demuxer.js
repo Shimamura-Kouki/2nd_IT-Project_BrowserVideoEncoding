@@ -4,6 +4,10 @@ import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE } from '../constan
 // Progress contribution: demuxing contributes 10% of total progress, encoding 90%
 const DEMUX_PROGRESS_PERCENTAGE = 10;
 
+// Track console.error interception to handle concurrent calls safely
+let consoleErrorInterceptionCount = 0;
+let originalConsoleError = console.error;
+
 /**
  * 入力MP4を解析し、WebCodecsのデコーダへ供給する
  * @param {File} file
@@ -32,7 +36,6 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         // These warnings occur when MP4Box encounters incomplete box structures
         // while loading data progressively. They are not actual errors and
         // processing continues normally. MP4Box handles these by waiting for more data.
-        const originalConsoleError = console.error;
         const suppressBoxParserWarnings = (...args) => {
             // Filter out BoxParser size validation warnings which are expected during progressive loading
             // Only check if first argument is a string to avoid false positives with objects
@@ -45,12 +48,23 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             originalConsoleError.apply(console, args);
         };
         
-        // Cleanup function to restore console.error in all exit paths
-        const cleanup = () => {
-            console.error = originalConsoleError;
-        };
+        // Setup interception with reference counting to handle concurrent calls
+        if (consoleErrorInterceptionCount === 0) {
+            originalConsoleError = console.error;
+            console.error = suppressBoxParserWarnings;
+        } else if (console.error !== suppressBoxParserWarnings) {
+            // Already intercepted by another concurrent call, ensure we use the same filter
+            console.error = suppressBoxParserWarnings;
+        }
+        consoleErrorInterceptionCount++;
         
-        console.error = suppressBoxParserWarnings;
+        // Cleanup function to restore console.error safely with reference counting
+        const cleanup = () => {
+            consoleErrorInterceptionCount--;
+            if (consoleErrorInterceptionCount === 0) {
+                console.error = originalConsoleError;
+            }
+        };
 
         mp4boxfile.onReady = (info) => {
             try {
