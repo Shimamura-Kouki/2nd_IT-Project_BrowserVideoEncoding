@@ -60,22 +60,27 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                     bitrate: audioBitrate
                 };
                 
-                // Get audio description for codecs that need it (e.g., AAC)
-                const audioEntry = mp4boxfile.getTrackById(audioTrackId).mdia.minf.stbl.stsd.entries[0];
-                const audioDescription = generateAudioDescriptionBuffer(audioEntry);
-                
                 const audioConfig = {
                     codec: audioTrack.codec,
                     sampleRate: audioTrack.audio.sample_rate,
                     numberOfChannels: audioTrack.audio.channel_count
                 };
                 
-                // Add description if available (required for AAC and some other codecs)
-                if (audioDescription) {
-                    audioConfig.description = audioDescription;
+                // Try to get audio description for codecs that might need it (e.g., AAC)
+                // Note: This is optional and many AAC streams work fine without it
+                try {
+                    const audioEntry = mp4boxfile.getTrackById(audioTrackId).mdia.minf.stbl.stsd.entries[0];
+                    const audioDescription = generateAudioDescriptionBuffer(audioEntry);
+                    
+                    if (audioDescription && audioDescription.length > 0) {
+                        audioConfig.description = audioDescription;
+                        console.log(`AudioDecoder using description buffer (${audioDescription.length} bytes)`);
+                    }
+                } catch (e) {
+                    console.warn('Failed to extract audio description, proceeding without it:', e);
                 }
                 
-                console.log(`Configuring AudioDecoder: codec=${audioConfig.codec}, sampleRate=${audioConfig.sampleRate}, channels=${audioConfig.numberOfChannels}, hasDescription=${!!audioDescription}`);
+                console.log(`Configuring AudioDecoder: codec=${audioConfig.codec}, sampleRate=${audioConfig.sampleRate}, channels=${audioConfig.numberOfChannels}`);
                 audioDecoder.configure(audioConfig);
                 console.log('AudioDecoder configured successfully');
                 mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
@@ -208,14 +213,14 @@ function generateDescriptionBuffer(entry) {
 
 function generateAudioDescriptionBuffer(entry) {
     // For AAC audio, we need the AudioSpecificConfig from the esds box
-    if (entry.esds) {
-        const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
-        entry.esds.write(stream);
-        // The esds box structure has the AudioSpecificConfig
-        // We need to extract it from the Elementary Stream Descriptor
-        // The exact offset may vary, so we'll return the full esds data
-        // and let the decoder parse it
-        return new Uint8Array(stream.buffer.slice(8));
+    if (entry.esds && entry.esds.esd) {
+        // The AudioSpecificConfig is stored in the DecoderConfigDescriptor
+        // which is part of the ES_Descriptor in the esds box
+        const esd = entry.esds.esd;
+        if (esd.decConfigDescr && esd.decConfigDescr.decSpecificInfo) {
+            // This is the actual AudioSpecificConfig
+            return esd.decConfigDescr.decSpecificInfo;
+        }
     }
     return null;
 }

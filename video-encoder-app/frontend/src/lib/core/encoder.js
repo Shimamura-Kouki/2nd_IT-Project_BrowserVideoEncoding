@@ -364,6 +364,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
             
             try {
                 console.log(`Configuring AudioEncoder: codec=${config.audio.codec}, sampleRate=${audioFormat.sampleRate}, channels=${audioFormat.numberOfChannels}, bitrate=${audioBitrate}`);
+                
+                // Validate sample rate for AAC codec
+                if (isAACCodec(config.audio.codec)) {
+                    const validSampleRates = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000];
+                    if (!validSampleRates.includes(audioFormat.sampleRate)) {
+                        console.warn(`Warning: Sample rate ${audioFormat.sampleRate} may not be supported by AAC encoder. Supported rates: ${validSampleRates.join(', ')}`);
+                    }
+                }
+                
                 audioEncoder.configure({
                     codec: config.audio.codec ?? 'mp4a.40.2',
                     sampleRate: audioFormat.sampleRate,
@@ -373,7 +382,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 console.log(`AudioEncoder configured successfully, state=${audioEncoder.state}`);
             } catch (e) {
                 console.error('Failed to configure AudioEncoder:', e);
-                throw e;
+                // Don't throw - just disable audio encoding
+                audioEncoder = null;
+                console.warn('Audio encoding will be disabled due to configuration error');
             }
         }
     };
@@ -459,17 +470,19 @@ export async function encodeToFile(file, config, onProgress, signal) {
         throw new DOMException('Encoding was cancelled', 'AbortError');
     }
     
-    if (audioEncoder) {
+    if (audioEncoder && audioEncoder.state === 'configured') {
         try {
-            // Only flush if encoder is in configured state
-            if (audioEncoder.state === 'configured') {
+            // Only flush if encoder has processed frames
+            if (totalAudioChunksReceived > 0) {
                 await audioEncoder.flush();
             } else {
-                console.warn(`Skipping audio encoder flush: encoder state is '${audioEncoder.state}' (expected 'configured')`);
+                console.warn('Skipping audio encoder flush: no audio chunks were encoded');
             }
         } catch (e) {
             console.error('AudioEncoder flush error:', e);
         }
+    } else if (audioEncoder) {
+        console.warn(`Skipping audio encoder flush: encoder state is '${audioEncoder.state}' (expected 'configured')`);
     }
     
     // Check if aborted after audio flush
