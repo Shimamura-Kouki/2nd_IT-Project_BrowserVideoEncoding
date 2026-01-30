@@ -249,10 +249,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     width: outputWidth, 
                     height: outputHeight 
                 },
-                firstTimestampBehavior: 'offset'
-                // Note: streaming parameter omitted to use default behavior
-                // This allows the muxer to create proper clusters at keyframe boundaries
-                // while still writing cues for seeking during finalization
+                firstTimestampBehavior: 'offset',
+                streaming: true  // Force immediate cluster creation as chunks arrive
+                // With FileSystemWritableFileStreamTarget, streaming:true creates clusters
+                // during encoding rather than buffering everything into one giant cluster.
+                // This enables proper seeking at keyframe boundaries.
             };
             
             if (hasAudio && config.audio && audioFormat) {
