@@ -465,12 +465,28 @@
         manualHeight = preset.height;
         framerateMode = 'manual';
         
-        // Find matching preset resolution
+        // Find matching preset resolution based on longest edge
+        // Calculate the longest edge from the preset's width and height
+        const presetLongestEdge = Math.max(preset.width, preset.height);
+        
+        // Find the closest matching longest-edge preset
         const matchingPreset = Object.entries(resolutionPresets).find(
-          ([_, res]) => res.width === preset.width && res.height === preset.height
+          ([_, res]) => res.longestEdge === presetLongestEdge
         );
         if (matchingPreset) {
           resolutionPreset = matchingPreset[0];
+        } else {
+          // If no exact match, find the closest one
+          let closestKey = '1920'; // default
+          let closestDiff = Infinity;
+          for (const [key, res] of Object.entries(resolutionPresets)) {
+            const diff = Math.abs(res.longestEdge - presetLongestEdge);
+            if (diff < closestDiff) {
+              closestDiff = diff;
+              closestKey = key;
+            }
+          }
+          resolutionPreset = closestKey;
         }
       }
     }
@@ -1061,6 +1077,25 @@
         {#if outputWidth > 0 && outputHeight > 0}
           <div style="color: #2196F3; font-size: 13px; padding: 8px 0; border-top: 1px solid #e0e0e0; margin-top: 8px;">
             <p style="margin: 4px 0;"><strong>出力解像度:</strong> {outputWidth} × {outputHeight}px</p>
+            <p style="margin: 4px 0;"><strong>出力コンテナ:</strong> {containerFormat.toUpperCase()}</p>
+            <p style="margin: 4px 0;"><strong>出力映像コーデック:</strong> {
+              videoCodec.startsWith('avc1.64') ? 'H.264 High' :
+              videoCodec.startsWith('avc1.4d') ? 'H.264 Main' :
+              videoCodec.startsWith('avc1.42') ? 'H.264 Baseline' :
+              videoCodec.startsWith('hev1') ? 'H.265 (hev1)' :
+              videoCodec.startsWith('hvc1') ? 'H.265 (hvc1)' :
+              videoCodec.startsWith('vp09') ? 'VP9' :
+              videoCodec.startsWith('av01') ? 'AV1' :
+              videoCodec
+            }</p>
+            <p style="margin: 4px 0;"><strong>出力音声コーデック:</strong> {
+              audioCodec === 'mp4a.40.2' ? 'AAC-LC' :
+              audioCodec === 'mp4a.40.5' ? 'AAC-HE' :
+              audioCodec === 'opus' ? 'Opus' :
+              audioCodec
+            }</p>
+            <p style="margin: 4px 0;"><strong>出力映像ビットレート:</strong> {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps</p>
+            <p style="margin: 4px 0;"><strong>出力音声ビットレート:</strong> {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps</p>
           </div>
         {/if}
       </div>
