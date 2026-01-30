@@ -163,10 +163,13 @@
     const aspectRatio = sourceWidth / sourceHeight;
     
     if (isLandscape) {
+      // For landscape videos, longest edge is width
       const width = longestEdge;
       const height = Math.round(longestEdge / aspectRatio);
       return { width, height: height % 2 === 0 ? height : height - 1 }; // Ensure even number
     } else {
+      // For portrait videos, longest edge is height
+      // width = height * (width/height) = height * aspectRatio
       const height = longestEdge;
       const width = Math.round(longestEdge * aspectRatio);
       return { width: width % 2 === 0 ? width : width - 1, height }; // Ensure even number
@@ -1233,7 +1236,7 @@
 
         {#if resolutionMode === 'preset'}
           <div class="row">
-            <label>長辺サイズ:</label>
+            <label>長辺プリセット:</label>
             <select bind:value={resolutionPreset}>
               {#each Object.entries(resolutionPresets) as [key, preset]}
                 {#if sourceFileAnalyzed && originalWidth > 0 && originalHeight > 0}
