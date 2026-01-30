@@ -6,7 +6,11 @@ export default defineConfig({
     base: '/2nd_IT-Project_BrowserVideoEncoding/',
     server: {
         port: 5173,
-        https: false
+        // https: false,
+        host: true,
+        allowedHosts: [
+            'thinkbook-14-g6-windows.bass-uaru.ts.net'
+        ]
     },
     build: {
         target: 'esnext',
