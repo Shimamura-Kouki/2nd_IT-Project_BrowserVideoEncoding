@@ -249,8 +249,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     width: outputWidth, 
                     height: outputHeight 
                 },
-                firstTimestampBehavior: 'offset',
-                streaming: false  // Disable streaming mode to enable proper seeking and duration storage
+                firstTimestampBehavior: 'offset'
+                // Note: streaming parameter omitted to use default behavior
+                // This allows the muxer to create proper clusters at keyframe boundaries
+                // while still writing cues for seeking during finalization
             };
             
             if (hasAudio && config.audio && audioFormat) {
