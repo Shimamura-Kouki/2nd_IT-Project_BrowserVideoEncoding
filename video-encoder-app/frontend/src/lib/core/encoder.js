@@ -359,12 +359,19 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
             }
             
-            audioEncoder.configure({
-                codec: config.audio.codec ?? 'mp4a.40.2',
-                sampleRate: audioFormat.sampleRate,
-                numberOfChannels: audioFormat.numberOfChannels,
-                bitrate: audioBitrate
-            });
+            try {
+                console.log(`Configuring AudioEncoder: codec=${config.audio.codec}, sampleRate=${audioFormat.sampleRate}, channels=${audioFormat.numberOfChannels}, bitrate=${audioBitrate}`);
+                audioEncoder.configure({
+                    codec: config.audio.codec ?? 'mp4a.40.2',
+                    sampleRate: audioFormat.sampleRate,
+                    numberOfChannels: audioFormat.numberOfChannels,
+                    bitrate: audioBitrate
+                });
+                console.log(`AudioEncoder configured successfully, state=${audioEncoder.state}`);
+            } catch (e) {
+                console.error('Failed to configure AudioEncoder:', e);
+                throw e;
+            }
         }
     };
 
@@ -410,6 +417,13 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 } catch (e) {
                     console.error('AudioEncoder encode error:', e);
                 }
+            } else {
+                // Log if audio data is being dropped
+                if (audioEncoder) {
+                    console.warn(`AudioEncoder not ready: state=${audioEncoder.state}, dropping audio frame`);
+                } else {
+                    console.warn('AudioEncoder not initialized, dropping audio frame');
+                }
             }
             audioData.close();
         },
@@ -437,7 +451,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
     
     if (audioEncoder) {
         try {
-            await audioEncoder.flush();
+            // Only flush if encoder is in configured state
+            if (audioEncoder.state === 'configured') {
+                await audioEncoder.flush();
+            } else {
+                console.warn(`Skipping audio encoder flush: encoder state is '${audioEncoder.state}' (expected 'configured')`);
+            }
         } catch (e) {
             console.error('AudioEncoder flush error:', e);
         }
