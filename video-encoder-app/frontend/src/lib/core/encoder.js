@@ -133,6 +133,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let hasVideoTrack = true; // Assume true until we know otherwise
     let hasAudioTrack = false; // Will be set based on config
     
+    // Track audio decoder frames for debugging
+    let audioDecoderFrameCount = 0;
+    
     // Guard flag to prevent multiple initializations
     // This prevents the race condition where initializeEncoders is called multiple times
     // (e.g., if demuxer's onReady callback fires multiple times)
@@ -411,6 +414,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
     const audioDecoder = new AudioDecoder({
         output: (audioData) => {
+            audioDecoderFrameCount++;
+            // Log first few frames for debugging
+            if (audioDecoderFrameCount <= 3) {
+                console.log(`AudioDecoder output #${audioDecoderFrameCount}: timestamp=${audioData.timestamp}, duration=${audioData.duration}, frames=${audioData.numberOfFrames}`);
+            }
             if (audioEncoder && audioEncoder.state === 'configured') {
                 try {
                     audioEncoder.encode(audioData);
@@ -418,11 +426,13 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     console.error('AudioEncoder encode error:', e);
                 }
             } else {
-                // Log if audio data is being dropped
-                if (audioEncoder) {
-                    console.warn(`AudioEncoder not ready: state=${audioEncoder.state}, dropping audio frame`);
-                } else {
-                    console.warn('AudioEncoder not initialized, dropping audio frame');
+                // Log first few times audio data is being dropped
+                if (audioDecoderFrameCount <= 3) {
+                    if (audioEncoder) {
+                        console.warn(`AudioEncoder not ready: state=${audioEncoder.state}, dropping audio frame #${audioDecoderFrameCount}`);
+                    } else {
+                        console.warn(`AudioEncoder not initialized, dropping audio frame #${audioDecoderFrameCount}`);
+                    }
                 }
             }
             audioData.close();

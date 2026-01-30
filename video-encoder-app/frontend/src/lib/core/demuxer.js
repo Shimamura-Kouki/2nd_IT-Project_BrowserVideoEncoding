@@ -75,7 +75,9 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                     audioConfig.description = audioDescription;
                 }
                 
+                console.log(`Configuring AudioDecoder: codec=${audioConfig.codec}, sampleRate=${audioConfig.sampleRate}, channels=${audioConfig.numberOfChannels}, hasDescription=${!!audioDescription}`);
                 audioDecoder.configure(audioConfig);
+                console.log('AudioDecoder configured successfully');
                 mp4boxfile.setExtractionOptions(audioTrackId, 'audio', { nbSamples: 100 });
             }
             
