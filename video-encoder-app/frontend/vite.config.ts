@@ -23,14 +23,13 @@ export default defineConfig(({ mode }) => {
 
     return {
         plugins: [svelte()],
-        base: '/2nd_IT-Project_BrowserVideoEncoding/', // おぬしの環境に合わせて調整せよ
+        base: '/2nd_IT-Project_BrowserVideoEncoding/',
         server: {
             port: 5173,
             host: true,
             allowedHosts: [
                 'thinkbook-14-g6-windows.bass-uaru.ts.net'
             ],
-            // ここでさっき作った設定を適用じゃ
             https: httpsConfig
         },
         build: {

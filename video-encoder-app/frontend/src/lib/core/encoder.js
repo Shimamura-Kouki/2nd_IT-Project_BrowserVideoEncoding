@@ -9,7 +9,7 @@ class ArrayBufferTarget {
         this.container = container;
         this.target = container === 'webm' ? new WebMArrayBufferTarget() : new MP4ArrayBufferTarget();
     }
-    
+
     get buffer() {
         return this.target.buffer;
     }
@@ -32,21 +32,21 @@ export async function encodeToFile(file, config, onProgress, signal) {
     const container = config.video.container || (
         config.video.codec.startsWith('vp') || config.video.codec.startsWith('av01') ? 'webm' : 'mp4'
     );
-    
+
     const fileExtension = container === 'webm' ? '.webm' : (container === 'mov' ? '.mov' : '.mp4');
     const mimeType = container === 'webm' ? 'video/webm' : 'video/mp4';
-    
+
     // Generate output filename based on original file and bitrate
     const originalNameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
     const videoBitrateMbps = (config.video.bitrate / 1000000).toFixed(1);
     const suggestedName = `${originalNameWithoutExt}_${videoBitrateMbps}Mbps${fileExtension}`;
-    
+
     // Check if File System Access API is supported (not available in Firefox)
     const supportsFileSystemAccess = 'showSaveFilePicker' in window;
-    
+
     let fileStream;
     let bufferTarget;
-    
+
     if (supportsFileSystemAccess) {
         const handle = await window.showSaveFilePicker({
             suggestedName: suggestedName,
@@ -63,10 +63,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let muxer = null;
     let videoEncoder = null;
     let audioEncoder = null;
-    
+
     // Track abort status
     let aborted = false;
-    
+
     // Cleanup function to handle cancellation
     const cleanup = async () => {
         aborted = true;
@@ -102,7 +102,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             console.error('Cleanup error:', e);
         }
     };
-    
+
     // Set up abort listener if signal is provided
     if (signal) {
         signal.addEventListener('abort', cleanup, { once: true });
@@ -111,7 +111,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let frameCount = 0;
     let totalFrames = 0; // Total frames to encode
     const start = performance.now();
-    
+
     // Track pending chunks to ensure all are written before finalization
     // This prevents the race condition where muxer.finalize() is called
     // while encoder output callbacks are still adding chunks
@@ -119,20 +119,20 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let pendingAudioChunks = 0;
     let encodingComplete = false;
     let muxerFinalized = false; // Flag to track if muxer has been finalized
-    
+
     // Track when chunks last arrived to detect when encoding is truly complete
     let lastVideoChunkTime = 0;
     let lastAudioChunkTime = 0;
     let totalVideoChunksReceived = 0;
     let totalAudioChunksReceived = 0;
-    
+
     // Track if encoders have started producing output
     // Critical: don't finalize until video encoder has started (if video exists)
     let videoEncoderStarted = false;
     let audioEncoderStarted = false;
     let hasVideoTrack = true; // Assume true until we know otherwise
     let hasAudioTrack = false; // Will be set based on config
-    
+
     // Guard flag to prevent multiple initializations
     // This prevents the race condition where initializeEncoders is called multiple times
     // (e.g., if demuxer's onReady callback fires multiple times)
@@ -148,32 +148,32 @@ export async function encodeToFile(file, config, onProgress, signal) {
             return;
         }
         encodersInitialized = true;
-        
+
         const { hasAudio, audioFormat, videoFormat, totalFrames: frames } = detectedFormat;
         totalFrames = frames ?? 0; // Store total frames for progress calculation
-        
+
         // Track if we have audio track
         hasAudioTrack = hasAudio && config.audio;
-        
+
         // Pass metadata to the progress callback
         onProgress(undefined, undefined, detectedFormat);
-        
+
         // Determine output framerate
         let outputFramerate = config.video.framerate;
         if (config.video.framerateMode === 'original' && videoFormat?.framerate) {
             outputFramerate = videoFormat.framerate;
             console.log(`Using original framerate: ${outputFramerate.toFixed(2)} fps`);
         }
-        
+
         // Calculate actual output dimensions to prevent upscaling
         let outputWidth = config.video.width;
         let outputHeight = config.video.height;
-        
+
         if (videoFormat) {
             const originalWidth = videoFormat.width;
             const originalHeight = videoFormat.height;
             const originalAspectRatio = originalWidth / originalHeight;
-            
+
             // If only width is specified (height is null/undefined), calculate height
             if (outputWidth && !outputHeight) {
                 outputHeight = Math.round(outputWidth / originalAspectRatio);
@@ -201,24 +201,24 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 outputWidth = originalWidth;
                 outputHeight = originalHeight;
             }
-            
+
             // Prevent upscaling: don't exceed original dimensions
             if (outputWidth > originalWidth || outputHeight > originalHeight) {
                 const scale = Math.min(originalWidth / outputWidth, originalHeight / outputHeight);
                 outputWidth = Math.round(outputWidth * scale);
                 outputHeight = Math.round(outputHeight * scale);
             }
-            
+
             // Ensure dimensions are even numbers (required for many codecs)
             outputWidth = Math.round(outputWidth / 2) * 2;
             outputHeight = Math.round(outputHeight / 2) * 2;
         }
-        
+
         // Determine container format from config
         const container = config.video.container || (
             config.video.codec.startsWith('vp') || config.video.codec.startsWith('av01') ? 'webm' : 'mp4'
         );
-        
+
         // Map WebCodecs codec strings to muxer codec identifiers
         const getMuxerCodec = (codecString, type) => {
             if (type === 'video') {
@@ -234,23 +234,23 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 return 'aac'; // default fallback
             }
         };
-        
+
         const videoMuxerCodec = getMuxerCodec(config.video.codec, 'video');
         const audioMuxerCodec = config.audio ? getMuxerCodec(config.audio.codec, 'audio') : null;
-        
+
         // Create muxer with appropriate configuration based on container
         if (container === 'webm') {
             // WebM muxer configuration
             const muxerConfig = {
                 target: fileStream ? new WebMTarget(fileStream) : bufferTarget.target,
-                video: { 
+                video: {
                     codec: videoMuxerCodec,
-                    width: outputWidth, 
-                    height: outputHeight 
+                    width: outputWidth,
+                    height: outputHeight
                 },
                 firstTimestampBehavior: 'offset'
             };
-            
+
             if (hasAudio && config.audio && audioFormat) {
                 muxerConfig.audio = {
                     codec: audioMuxerCodec,
@@ -258,16 +258,16 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     numberOfChannels: audioFormat.numberOfChannels
                 };
             }
-            
+
             muxer = new WebMMuxer(muxerConfig);
         } else {
             // MP4 muxer configuration
             const muxerConfig = {
                 target: fileStream ? new MP4Target(fileStream) : bufferTarget.target,
-                video: { 
+                video: {
                     codec: videoMuxerCodec,
-                    width: outputWidth, 
-                    height: outputHeight 
+                    width: outputWidth,
+                    height: outputHeight
                 },
                 fastStart: false,
                 firstTimestampBehavior: 'offset'
@@ -291,12 +291,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     videoEncoderStarted = true;
                     console.log('✓ Video encoder started producing chunks');
                 }
-                
+
                 // Increment counter first to ensure proper tracking
                 pendingVideoChunks++;
                 totalVideoChunksReceived++;
                 lastVideoChunkTime = performance.now();
-                
+
                 try {
                     // Ignore chunks that arrive after muxer finalization with a warning
                     // This can happen with VP9/VP8 encoders which may have delayed callbacks
@@ -329,12 +329,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
                         audioEncoderStarted = true;
                         console.log('✓ Audio encoder started producing chunks');
                     }
-                    
+
                     // Increment counter first to ensure proper tracking
                     pendingAudioChunks++;
                     totalAudioChunksReceived++;
                     lastAudioChunkTime = performance.now();
-                    
+
                     try {
                         // Ignore chunks that arrive after muxer finalization with a warning
                         // This can happen with some audio encoders which may have delayed callbacks
@@ -371,7 +371,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 // AAC-LC and AAC-HE: Round to nearest valid value using shared utility
                 audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
             }
-            
+
             try {
                 audioEncoder.configure({
                     codec: config.audio.codec ?? 'mp4a.40.2',
@@ -411,14 +411,14 @@ export async function encodeToFile(file, config, onProgress, signal) {
             frame.close();
             const elapsedMs = performance.now() - start;
             const fps = frameCount / (elapsedMs / 1000);
-            
+
             // Calculate progress: DEMUX_PROGRESS_PERCENTAGE for demuxing (already done) + remaining for encoding
             // Encoding progress is based on frames processed vs total frames
             let encodingProgress = DEMUX_PROGRESS_PERCENTAGE; // Start at demuxing complete
             if (totalFrames > 0) {
                 encodingProgress = DEMUX_PROGRESS_PERCENTAGE + (frameCount / totalFrames) * ENCODING_PROGRESS_PERCENTAGE;
             }
-            
+
             // Calculate estimated time to completion (ETA)
             let etaMs = 0;
             if (totalFrames > 0 && frameCount > 0 && frameCount < totalFrames) {
@@ -426,7 +426,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 const estimatedTotalMs = elapsedMs / progressRatio;
                 etaMs = estimatedTotalMs - elapsedMs;
             }
-            
+
             onProgress(encodingProgress, { fps, elapsedMs, etaMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
@@ -472,12 +472,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
     } catch (e) {
         console.error('VideoEncoder flush error:', e);
     }
-    
+
     // Check if aborted after video flush
     if (aborted || (signal && signal.aborted)) {
         throw new DOMException('Encoding was cancelled', 'AbortError');
     }
-    
+
     if (audioEncoder) {
         try {
             await audioEncoder.flush();
@@ -485,15 +485,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
             console.error('AudioEncoder flush error:', e);
         }
     }
-    
+
     // Check if aborted after audio flush
     if (aborted || (signal && signal.aborted)) {
         throw new DOMException('Encoding was cancelled', 'AbortError');
     }
-    
+
     // Mark encoding as complete
     encodingComplete = true;
-    
+
     // Wait until no new chunks have arrived for a sustained period
     // This is critical for VP9/VP8/AV1 encoders which continue to fire callbacks after flush()
     // IMPORTANT: Video encoder may start much later than audio encoder (can be seconds)
@@ -502,40 +502,40 @@ export async function encodeToFile(file, config, onProgress, signal) {
     //            This is a browser implementation limitation - Firefox can have >10s gaps between chunks
     const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
     const MAX_STALL_TIME_MS = 60000; // Maximum time without ANY chunks arriving before considering stalled (60s)
-                                     // Increased from 30s to accommodate Firefox's extremely slow AV1 encoder
+    // Increased from 30s to accommodate Firefox's extremely slow AV1 encoder
     const POLL_INTERVAL_MS = 50; // Check every 50ms
-    
+
     console.log('Waiting for all encoder chunks to complete...');
     console.log(`Initial state: video chunks received=${totalVideoChunksReceived}, audio chunks received=${totalAudioChunksReceived}`);
     console.log(`Expected encoders: video=${hasVideoTrack ? 'yes' : 'no'}, audio=${hasAudioTrack ? 'yes' : 'no'}`);
     if (totalFrames > 0) {
         console.log(`Expected frames: ${totalFrames}`);
     }
-    
+
     const waitStartTime = performance.now();
     let lastCheckTime = waitStartTime;
     let lastTotalVideoChunks = totalVideoChunksReceived;
     let lastTotalAudioChunks = totalAudioChunksReceived;
     let lastChunkArrivalTime = waitStartTime; // Track when we last received ANY chunk
     let lastLogTime = waitStartTime; // Track when we last logged chunk progress (to avoid log spam)
-    
+
     // Performance tracking: record time at each 10% milestone
     let videoEncodingStartTime = null; // When first video chunk arrives
     const milestones = []; // Array of {percent, chunks, time} for each 10% milestone
-    
+
     // Poll until no new chunks arrive for CHUNK_IDLE_TIMEOUT_MS
     while (true) {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
-        
+
         // Check if aborted during wait
         if (aborted || (signal && signal.aborted)) {
             throw new DOMException('Encoding was cancelled', 'AbortError');
         }
-        
+
         const now = performance.now();
         const elapsedTotal = now - waitStartTime;
         const timeSinceLastChunk = now - lastChunkArrivalTime;
-        
+
         // Safety timeout - only if encoding has truly stalled (no chunks for MAX_STALL_TIME_MS)
         // This allows slow encoders (like Firefox AV1) to take as long as needed, as long as they're making progress
         if (timeSinceLastChunk > MAX_STALL_TIME_MS) {
@@ -548,23 +548,23 @@ export async function encodeToFile(file, config, onProgress, signal) {
             }
             break;
         }
-        
+
         // Check if new chunks arrived since last check
         if (totalVideoChunksReceived > lastTotalVideoChunks || totalAudioChunksReceived > lastTotalAudioChunks) {
             // New chunks arrived, reset the idle timer
             lastCheckTime = now;
             lastChunkArrivalTime = now; // Update last chunk arrival time
-            
+
             // Track video encoding start time (when first video chunk arrives)
             if (totalVideoChunksReceived > 0 && videoEncodingStartTime === null) {
                 videoEncodingStartTime = now;
             }
-            
+
             // Track 10% milestones for performance analysis
             if (totalFrames > 0 && totalVideoChunksReceived > lastTotalVideoChunks) {
                 const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10; // 0, 10, 20, ..., 90, 100
                 const lastPercent = Math.floor((lastTotalVideoChunks / totalFrames) * 10) * 10;
-                
+
                 // Check if we crossed a 10% milestone and haven't recorded it yet
                 if (currentPercent > lastPercent && currentPercent > 0 && currentPercent <= 100) {
                     // Check if this milestone hasn't been recorded yet (avoid duplicates)
@@ -578,10 +578,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     }
                 }
             }
-            
+
             lastTotalVideoChunks = totalVideoChunksReceived;
             lastTotalAudioChunks = totalAudioChunksReceived;
-            
+
             // Log progress periodically to avoid performance impact from excessive logging
             // Only log every 100 chunks OR every 2 seconds (whichever comes first)
             // Note: Excessive console.log can slow down encoding significantly
@@ -591,7 +591,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             }
             continue;
         }
-        
+
         // CRITICAL CHECK: Don't finalize until video encoder has started producing chunks
         // Video encoder can start much later than audio encoder (especially for AV1)
         if (hasVideoTrack && !videoEncoderStarted) {
@@ -603,7 +603,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             lastCheckTime = now; // Reset idle timer since we're still waiting for video to start
             continue;
         }
-        
+
         // Check if audio encoder should have started
         if (hasAudioTrack && !audioEncoderStarted) {
             // Audio encoder hasn't started yet, keep waiting
@@ -613,7 +613,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             lastCheckTime = now; // Reset idle timer since we're still waiting for audio to start
             continue;
         }
-        
+
         // CRITICAL CHECK: If we know total frames, ensure we have received a reasonable number of chunks
         // Video chunks should be at least 90% of total frames before allowing idle timeout
         // (50% was too low - caused finalization at halfway point when chunks had a brief gap)
@@ -627,7 +627,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             lastCheckTime = now; // Reset idle timer since we're still expecting more chunks
             continue;
         }
-        
+
         // CRITICAL CHECK: If we're still significantly below 100%, keep waiting
         // At 96.7%, 2000ms idle timeout was triggering, losing 3.3% of chunks and corrupting the video
         // Only allow idle timeout to finalize when we're very close to completion (≥99%)
@@ -641,12 +641,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
             lastCheckTime = now; // Reset idle timer since we're still expecting more chunks
             continue;
         }
-        
+
         // No new chunks since last check AND all expected encoders have started
         // AND we have enough chunks (≥99% or don't know expected count)
         // See if we've waited long enough
         const idleTime = now - lastCheckTime;
-        
+
         // Use adaptive idle timeout based on chunk coverage
         // If we're still below expected count (99-100%), use a longer timeout
         let effectiveIdleTimeout = CHUNK_IDLE_TIMEOUT_MS; // 500ms default
@@ -655,7 +655,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             // Use a longer idle timeout (3 seconds) to ensure we get the last few chunks
             effectiveIdleTimeout = 3000;
         }
-        
+
         if (idleTime >= effectiveIdleTimeout) {
             // No chunks for effectiveIdleTimeout - we're done
             console.log(`No new chunks for ${effectiveIdleTimeout}ms, encoding complete`);
@@ -667,31 +667,31 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     console.warn(`WARNING: Finalizing with incomplete video - missing ${totalFrames - totalVideoChunksReceived} chunks (${(100 - parseFloat(coverage)).toFixed(1)}%)`);
                 }
             }
-            
+
             // Log performance metrics
             if (videoEncodingStartTime !== null && totalVideoChunksReceived > 0) {
                 const totalEncodingTime = (now - videoEncodingStartTime) / 1000; // seconds
-                
+
                 // Guard against division by zero
                 if (totalEncodingTime > 0) {
                     const averageFps = totalVideoChunksReceived / totalEncodingTime;
-                    
+
                     console.log('\n=== Encoding Performance Metrics ===');
                     console.log(`Total encoding time: ${totalEncodingTime.toFixed(2)}s`);
                     console.log(`Average FPS: ${averageFps.toFixed(1)} fps`);
-                    
+
                     // Calculate FPS for each 10% segment
                     if (milestones.length > 0) {
                         console.log('\nFPS per 10% segment:');
-                        
+
                         let prevPercent = 0;
                         let prevChunks = 0;
                         let prevTime = videoEncodingStartTime;
-                        
+
                         for (const milestone of milestones) {
                             const chunksDiff = milestone.chunks - prevChunks;
                             const timeDiff = (milestone.time - prevTime) / 1000; // seconds
-                            
+
                             // Guard against division by zero
                             if (timeDiff > 0) {
                                 const segmentFps = chunksDiff / timeDiff;
@@ -699,18 +699,18 @@ export async function encodeToFile(file, config, onProgress, signal) {
                             } else {
                                 console.log(`  ${prevPercent}%-${milestone.percent}%: N/A (${chunksDiff} chunks in <0.01s)`);
                             }
-                            
+
                             prevPercent = milestone.percent;
                             prevChunks = milestone.chunks;
                             prevTime = milestone.time;
                         }
-                        
+
                         // Add final segment if not at 100% or if we have chunks after the last milestone
                         const currentPercent = Math.floor((totalVideoChunksReceived / totalFrames) * 10) * 10;
                         if (prevPercent < 100 && totalVideoChunksReceived > prevChunks) {
                             const chunksDiff = totalVideoChunksReceived - prevChunks;
                             const timeDiff = (now - prevTime) / 1000;
-                            
+
                             // Guard against division by zero
                             if (timeDiff > 0) {
                                 const segmentFps = chunksDiff / timeDiff;
@@ -729,11 +729,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     console.log('====================================\n');
                 }
             }
-            
+
             break;
         }
     }
-    
+
     // Wait for any pending chunks to finish writing
     if (pendingVideoChunks > 0 || pendingAudioChunks > 0) {
         console.log(`Waiting for pending chunks to finish: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
@@ -745,17 +745,17 @@ export async function encodeToFile(file, config, onProgress, signal) {
             console.warn(`Still have pending chunks after 1s wait: video=${pendingVideoChunks}, audio=${pendingAudioChunks}`);
         }
     }
-    
+
     // Set progress to 100% when encoding is complete
     onProgress(100);
-    
+
     // Mark muxer as finalized to prevent late encoder callbacks from adding chunks
     // This MUST be set before calling muxer.finalize() to prevent race condition
     muxerFinalized = true;
-    
+
     // Now safe to finalize - all chunks have been written
     muxer.finalize();
-    
+
     if (fileStream) {
         await fileStream.close();
     } else {
