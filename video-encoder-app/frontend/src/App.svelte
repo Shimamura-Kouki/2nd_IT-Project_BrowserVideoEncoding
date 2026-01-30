@@ -469,24 +469,66 @@
         // Calculate the longest edge from the preset's width and height
         const presetLongestEdge = Math.max(preset.width, preset.height);
         
-        // Find the closest matching longest-edge preset
-        const matchingPreset = Object.entries(resolutionPresets).find(
-          ([_, res]) => res.longestEdge === presetLongestEdge
-        );
-        if (matchingPreset) {
-          resolutionPreset = matchingPreset[0];
-        } else {
-          // If no exact match, find the closest one
-          let closestKey = '1920'; // default
-          let closestDiff = Infinity;
-          for (const [key, res] of Object.entries(resolutionPresets)) {
-            const diff = Math.abs(res.longestEdge - presetLongestEdge);
-            if (diff < closestDiff) {
-              closestDiff = diff;
-              closestKey = key;
+        // Check if this would be an upscale when source file is analyzed
+        if (sourceFileAnalyzed && originalWidth > 0 && originalHeight > 0) {
+          const sourceMaxEdge = Math.max(originalWidth, originalHeight);
+          
+          // If preset would upscale, find the largest allowed preset instead
+          if (presetLongestEdge > sourceMaxEdge) {
+            // Find the largest preset that doesn't exceed source resolution
+            let bestKey = '640'; // minimum fallback
+            let bestEdge = 640;
+            
+            for (const [key, res] of Object.entries(resolutionPresets)) {
+              if (res.longestEdge <= sourceMaxEdge && res.longestEdge > bestEdge) {
+                bestKey = key;
+                bestEdge = res.longestEdge;
+              }
+            }
+            resolutionPreset = bestKey;
+          } else {
+            // Find the matching preset (no upscaling needed)
+            const matchingPreset = Object.entries(resolutionPresets).find(
+              ([_, res]) => res.longestEdge === presetLongestEdge
+            );
+            if (matchingPreset) {
+              resolutionPreset = matchingPreset[0];
+            } else {
+              // If no exact match, find the closest one that doesn't upscale
+              let closestKey = '640';
+              let closestDiff = Infinity;
+              for (const [key, res] of Object.entries(resolutionPresets)) {
+                if (res.longestEdge <= sourceMaxEdge) {
+                  const diff = Math.abs(res.longestEdge - presetLongestEdge);
+                  if (diff < closestDiff) {
+                    closestDiff = diff;
+                    closestKey = key;
+                  }
+                }
+              }
+              resolutionPreset = closestKey;
             }
           }
-          resolutionPreset = closestKey;
+        } else {
+          // Source file not analyzed yet, apply preset as-is
+          const matchingPreset = Object.entries(resolutionPresets).find(
+            ([_, res]) => res.longestEdge === presetLongestEdge
+          );
+          if (matchingPreset) {
+            resolutionPreset = matchingPreset[0];
+          } else {
+            // If no exact match, find the closest one
+            let closestKey = '1920'; // default
+            let closestDiff = Infinity;
+            for (const [key, res] of Object.entries(resolutionPresets)) {
+              const diff = Math.abs(res.longestEdge - presetLongestEdge);
+              if (diff < closestDiff) {
+                closestDiff = diff;
+                closestKey = key;
+              }
+            }
+            resolutionPreset = closestKey;
+          }
         }
       }
     }
