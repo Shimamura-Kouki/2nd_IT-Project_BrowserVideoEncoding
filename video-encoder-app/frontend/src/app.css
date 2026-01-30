@@ -10,6 +10,9 @@
   --color-progressBg: #e3f2fd;
   --color-error: #d32f2f;
   --color-success: #388e3c;
+  --color-warningBg: #fff3cd;
+  --color-warningText: #856404;
+  --color-warningBorder: #ffc107;
 }
 
 html,

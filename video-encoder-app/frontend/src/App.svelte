@@ -23,6 +23,10 @@
   let errorLogs: string[] = [];
   let showErrorLogs = false;
 
+  // Browser compatibility detection
+  let isFirefox = false;
+  let showBrowserWarning = true;
+
   // Source file metadata (extracted from demuxer)
   let originalWidth = 0;
   let originalHeight = 0;
@@ -539,6 +543,9 @@
   onMount(() => {
     presets = loadPresets();
     
+    // Detect Firefox browser
+    isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+    
     // Intercept console.error to capture error logs
     const originalConsoleError = console.error;
     console.error = function(...args) {
@@ -795,6 +802,64 @@
     text-decoration: underline;
   }
 
+  .browser-warning {
+    background: var(--color-warningBg);
+    border: 2px solid var(--color-warningBorder);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 24px;
+    color: var(--color-warningText);
+  }
+
+  .browser-warning h3 {
+    margin: 0 0 8px 0;
+    color: var(--color-warningText);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .browser-warning p {
+    margin: 8px 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--color-warningText);
+  }
+
+  .browser-warning strong {
+    font-weight: 600;
+    color: var(--color-warningText);
+  }
+
+  .browser-warning ul {
+    margin: 8px 0 8px 20px;
+    font-size: 14px;
+    color: var(--color-warningText);
+  }
+
+  .browser-warning .close-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-warningText);
+    cursor: pointer;
+    font-size: 20px;
+    padding: 0;
+    margin-left: auto;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+
+  .browser-warning .close-btn:hover {
+    opacity: 1;
+  }
+
+  .browser-warning-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
 </style>
 
 <div class="container">
@@ -802,6 +867,27 @@
     <h1>ブラウザ動画エンコーダ</h1>
     <ThemeSwitcher />
   </div>
+
+  {#if isFirefox && showBrowserWarning}
+    <div class="browser-warning">
+      <div class="browser-warning-header">
+        <h3>⚠️ ブラウザ互換性警告</h3>
+        <button class="close-btn" on:click={() => showBrowserWarning = false}>×</button>
+      </div>
+      <p>
+        <strong>Firefoxでは既知の問題があります。</strong>
+        WebCodecs APIの実装に不具合があり、以下のコーデックで正常に動作しない可能性があります:
+      </p>
+      <ul>
+        <li>AV1コーデック - エンコードが100%完了しない</li>
+        <li>VP9コーデック - エンコードが100%完了しない</li>
+        <li>H.264コーデック - エラーが発生する可能性</li>
+      </ul>
+      <p>
+        <strong>推奨ブラウザ:</strong> Google Chrome または Microsoft Edge の最新版をご使用ください。
+      </p>
+    </div>
+  {/if}
 
   <div class="dropzone" on:click={() => document.getElementById('fileInput')?.click()}>
     <input type="file" id="fileInput" accept="video/mp4" on:change={pickFile} />
