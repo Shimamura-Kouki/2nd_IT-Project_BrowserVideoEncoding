@@ -249,11 +249,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     width: outputWidth, 
                     height: outputHeight 
                 },
-                firstTimestampBehavior: 'offset',
-                streaming: true  // Force immediate cluster creation as chunks arrive
-                // With FileSystemWritableFileStreamTarget, streaming:true creates clusters
-                // during encoding rather than buffering everything into one giant cluster.
-                // This enables proper seeking at keyframe boundaries.
+                firstTimestampBehavior: 'offset'
+                // Note: No streaming parameter specified
+                // - streaming:true creates clusters but NO cues → seeking broken
+                // - streaming:false/undefined creates cues but one cluster → slow seeking
+                // Trade-off: Slow seeking is better than no seeking capability
+                // This is a known limitation of webm-muxer with FileSystemWritableFileStreamTarget
             };
             
             if (hasAudio && config.audio && audioFormat) {
