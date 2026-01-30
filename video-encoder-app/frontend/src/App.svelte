@@ -939,7 +939,7 @@
 
   <!-- Video seeking warning -->
   {#if showSeekWarning}
-    <div class="browser-warning" style="border-color: #ff9800; background-color: #fff3e0;">
+    <div class="browser-warning">
       <div class="browser-warning-header">
         <h3>⚠️ 動画ファイル警告</h3>
         <button class="close-btn" on:click={() => showSeekWarning = false}>×</button>
@@ -947,7 +947,7 @@
       <p>
         <strong>この動画ファイルにはシーク情報の問題があります。</strong>
       </p>
-      <p style="color: #e65100; font-weight: bold; margin-top: 8px;">
+      <p style="font-weight: bold; margin-top: 8px;">
         動画のシークができません
       </p>
       <p style="font-size: 14px; margin-top: 8px;">
