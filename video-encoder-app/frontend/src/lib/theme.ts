@@ -14,6 +14,9 @@ export interface Theme {
     progressBg: string;
     error: string;
     success: string;
+    warningBg: string;
+    warningText: string;
+    warningBorder: string;
   };
 }
 
@@ -32,6 +35,9 @@ export const themes: Record<string, Theme> = {
       progressBg: '#e3f2fd',
       error: '#d32f2f',
       success: '#388e3c',
+      warningBg: '#fff3cd',
+      warningText: '#856404',
+      warningBorder: '#ffc107',
     },
   },
   dark: {
@@ -48,6 +54,9 @@ export const themes: Record<string, Theme> = {
       progressBg: '#263238',
       error: '#ef5350',
       success: '#66bb6a',
+      warningBg: '#3e2723',
+      warningText: '#ffecb3',
+      warningBorder: '#ff6f00',
     },
   },
   ocean: {
@@ -64,6 +73,9 @@ export const themes: Record<string, Theme> = {
       progressBg: '#1a2332',
       error: '#ff6b6b',
       success: '#51cf66',
+      warningBg: '#1a3a52',
+      warningText: '#ffe082',
+      warningBorder: '#ffa726',
     },
   },
   purple: {
@@ -80,6 +92,9 @@ export const themes: Record<string, Theme> = {
       progressBg: '#311b92',
       error: '#f44336',
       success: '#4caf50',
+      warningBg: '#3d1f4e',
+      warningText: '#ffe57f',
+      warningBorder: '#ff9800',
     },
   },
 };
