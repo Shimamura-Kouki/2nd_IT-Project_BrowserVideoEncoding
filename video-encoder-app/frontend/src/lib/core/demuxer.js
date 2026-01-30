@@ -38,12 +38,16 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
         // processing continues normally. MP4Box handles these by waiting for more data.
         const suppressBoxParserWarnings = (...args) => {
             // Filter out BoxParser size validation warnings which are expected during progressive loading
-            // Only check if first argument is a string to avoid false positives with objects
-            if (typeof args[0] === 'string') {
-                const message = args[0];
-                if (message.includes('[BoxParser]') && message.includes('greater than its container size')) {
-                    return; // Suppress this expected warning
-                }
+            // MP4Box's Log.error() calls console.error with multiple arguments:
+            // args[0]: "[timestamp]" (e.g., "[0:00:09.488]")
+            // args[1]: "[BoxParser]"
+            // args[2]: "Box of type '...' has a size ... greater than its container size ..."
+            // We need to check if any argument contains the pattern
+            const hasBoxParserModule = args.some(arg => typeof arg === 'string' && arg.includes('[BoxParser]'));
+            const hasContainerSizeWarning = args.some(arg => typeof arg === 'string' && arg.includes('greater than its container size'));
+            
+            if (hasBoxParserModule && hasContainerSizeWarning) {
+                return; // Suppress this expected warning
             }
             originalConsoleError.apply(console, args);
         };
