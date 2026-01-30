@@ -133,6 +133,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let hasVideoTrack = true; // Assume true until we know otherwise
     let hasAudioTrack = false; // Will be set based on config
     
+    // Track audio decoder frames for debugging
+    let audioDecoderFrameCount = 0;
+    
     // Guard flag to prevent multiple initializations
     // This prevents the race condition where initializeEncoders is called multiple times
     // (e.g., if demuxer's onReady callback fires multiple times)
@@ -238,7 +241,79 @@ export async function encodeToFile(file, config, onProgress, signal) {
         const videoMuxerCodec = getMuxerCodec(config.video.codec, 'video');
         const audioMuxerCodec = config.audio ? getMuxerCodec(config.audio.codec, 'audio') : null;
         
+        // First, try to create and configure audio encoder if needed
+        // This allows us to know if audio encoding is actually possible before creating the muxer
+        let audioEncoderReady = false;
+        if (hasAudio && config.audio && audioFormat) {
+            audioEncoder = new AudioEncoder({
+                output: (chunk, meta) => {
+                    // Mark that audio encoder has started producing chunks
+                    if (!audioEncoderStarted) {
+                        audioEncoderStarted = true;
+                        console.log('✓ Audio encoder started producing chunks');
+                    }
+                    
+                    // Increment counter first to ensure proper tracking
+                    pendingAudioChunks++;
+                    totalAudioChunksReceived++;
+                    lastAudioChunkTime = performance.now();
+                    
+                    try {
+                        // Ignore chunks that arrive after muxer finalization with a warning
+                        // This can happen with some audio encoders which may have delayed callbacks
+                        if (muxerFinalized) {
+                            console.warn(`AudioEncoder output callback fired after muxer finalization - ignoring chunk ${totalAudioChunksReceived}`);
+                            return;
+                        }
+                        muxer.addAudioChunk(chunk, meta);
+                    } finally {
+                        pendingAudioChunks--;
+                    }
+                },
+                error: (e) => console.error('AudioEncoder error', e)
+            });
+
+            // Configure AudioEncoder with detected format from source file
+            // Apply AAC bitrate rounding to valid values if needed
+            let audioBitrate = config.audio.bitrate;
+            if (isAACCodec(config.audio.codec)) {
+                audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
+            }
+            
+            try {
+                console.log(`Configuring AudioEncoder: codec=${config.audio.codec}, sampleRate=${audioFormat.sampleRate}, channels=${audioFormat.numberOfChannels}, bitrate=${audioBitrate}`);
+                
+                // Validate sample rate for AAC codec
+                if (isAACCodec(config.audio.codec)) {
+                    const validSampleRates = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000];
+                    if (!validSampleRates.includes(audioFormat.sampleRate)) {
+                        console.warn(`Warning: Sample rate ${audioFormat.sampleRate} may not be supported by AAC encoder. Supported rates: ${validSampleRates.join(', ')}`);
+                    }
+                }
+                
+                audioEncoder.configure({
+                    codec: config.audio.codec ?? 'mp4a.40.2',
+                    sampleRate: audioFormat.sampleRate,
+                    numberOfChannels: audioFormat.numberOfChannels,
+                    bitrate: audioBitrate
+                });
+                console.log(`AudioEncoder configured successfully, state=${audioEncoder.state}`);
+                audioEncoderReady = true;
+            } catch (e) {
+                console.error('Failed to configure AudioEncoder:', e);
+                // Close the encoder and disable audio
+                try {
+                    audioEncoder.close();
+                } catch (closeError) {
+                    // Ignore close errors
+                }
+                audioEncoder = null;
+                console.warn('Audio encoding will be disabled due to configuration error');
+            }
+        }
+        
         // Create muxer with appropriate configuration based on container
+        // Only include audio track if audioEncoder was successfully configured
         if (container === 'webm') {
             // WebM muxer configuration
             const muxerConfig = {
@@ -251,7 +326,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 firstTimestampBehavior: 'offset'
             };
             
-            if (hasAudio && config.audio && audioFormat) {
+            // Only add audio track if encoder was successfully configured
+            if (audioEncoderReady && audioEncoder) {
                 muxerConfig.audio = {
                     codec: audioMuxerCodec,
                     sampleRate: audioFormat.sampleRate,
@@ -273,7 +349,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 firstTimestampBehavior: 'offset'
             };
 
-            if (hasAudio && config.audio && audioFormat) {
+            // Only add audio track if encoder was successfully configured
+            if (audioEncoderReady && audioEncoder) {
                 muxerConfig.audio = {
                     codec: audioMuxerCodec,
                     sampleRate: audioFormat.sampleRate,
@@ -320,52 +397,6 @@ export async function encodeToFile(file, config, onProgress, signal) {
             framerate: outputFramerate,
             latencyMode: 'quality'
         });
-
-        if (hasAudio && config.audio && audioFormat) {
-            audioEncoder = new AudioEncoder({
-                output: (chunk, meta) => {
-                    // Mark that audio encoder has started producing chunks
-                    if (!audioEncoderStarted) {
-                        audioEncoderStarted = true;
-                        console.log('✓ Audio encoder started producing chunks');
-                    }
-                    
-                    // Increment counter first to ensure proper tracking
-                    pendingAudioChunks++;
-                    totalAudioChunksReceived++;
-                    lastAudioChunkTime = performance.now();
-                    
-                    try {
-                        // Ignore chunks that arrive after muxer finalization with a warning
-                        // This can happen with some audio encoders which may have delayed callbacks
-                        if (muxerFinalized) {
-                            console.warn(`AudioEncoder output callback fired after muxer finalization - ignoring chunk ${totalAudioChunksReceived}`);
-                            return;
-                        }
-                        muxer.addAudioChunk(chunk, meta);
-                    } finally {
-                        pendingAudioChunks--;
-                    }
-                },
-                error: (e) => console.error('AudioEncoder error', e)
-            });
-
-            // Configure AudioEncoder with detected format from source file
-            // This ensures compatibility with decoded audio data
-            // Apply AAC bitrate rounding to valid values if needed
-            let audioBitrate = config.audio.bitrate;
-            if (isAACCodec(config.audio.codec)) {
-                // AAC-LC and AAC-HE: Round to nearest valid value using shared utility
-                audioBitrate = validateAudioBitrate(config.audio.codec, audioBitrate);
-            }
-            
-            audioEncoder.configure({
-                codec: config.audio.codec ?? 'mp4a.40.2',
-                sampleRate: audioFormat.sampleRate,
-                numberOfChannels: audioFormat.numberOfChannels,
-                bitrate: audioBitrate
-            });
-        }
     };
 
     const videoDecoder = new VideoDecoder({
@@ -404,11 +435,25 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
     const audioDecoder = new AudioDecoder({
         output: (audioData) => {
+            audioDecoderFrameCount++;
+            // Log first few frames for debugging
+            if (audioDecoderFrameCount <= 3) {
+                console.log(`AudioDecoder output #${audioDecoderFrameCount}: timestamp=${audioData.timestamp}, duration=${audioData.duration}, frames=${audioData.numberOfFrames}`);
+            }
             if (audioEncoder && audioEncoder.state === 'configured') {
                 try {
                     audioEncoder.encode(audioData);
                 } catch (e) {
                     console.error('AudioEncoder encode error:', e);
+                }
+            } else {
+                // Log first few times audio data is being dropped
+                if (audioDecoderFrameCount <= 3) {
+                    if (audioEncoder) {
+                        console.warn(`AudioEncoder not ready: state=${audioEncoder.state}, dropping audio frame #${audioDecoderFrameCount}`);
+                    } else {
+                        console.warn(`AudioEncoder not initialized, dropping audio frame #${audioDecoderFrameCount}`);
+                    }
                 }
             }
             audioData.close();
@@ -435,12 +480,19 @@ export async function encodeToFile(file, config, onProgress, signal) {
         throw new DOMException('Encoding was cancelled', 'AbortError');
     }
     
-    if (audioEncoder) {
+    if (audioEncoder && audioEncoder.state === 'configured') {
         try {
-            await audioEncoder.flush();
+            // Only flush if encoder has processed frames
+            if (totalAudioChunksReceived > 0) {
+                await audioEncoder.flush();
+            } else {
+                console.warn('Skipping audio encoder flush: no audio chunks were encoded');
+            }
         } catch (e) {
             console.error('AudioEncoder flush error:', e);
         }
+    } else if (audioEncoder) {
+        console.warn(`Skipping audio encoder flush: encoder state is '${audioEncoder.state}' (expected 'configured')`);
     }
     
     // Check if aborted after audio flush
@@ -538,14 +590,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             
             lastTotalVideoChunks = totalVideoChunksReceived;
             lastTotalAudioChunks = totalAudioChunksReceived;
-            
-            // Log progress periodically to avoid performance impact from excessive logging
-            // Only log every 100 chunks OR every 2 seconds (whichever comes first)
-            // Note: Excessive console.log can slow down encoding significantly
-            if (totalVideoChunksReceived % 100 === 0 || (now - lastLogTime > 2000)) {
-                console.log(`New chunks arrived: video=${totalVideoChunksReceived}, audio=${totalAudioChunksReceived}, resetting idle timer`);
-                lastLogTime = now;
-            }
+            lastLogTime = now;
             continue;
         }
         
