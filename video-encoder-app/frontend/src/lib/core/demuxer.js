@@ -121,6 +121,11 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             mp4boxfile.start();
         };
 
+        mp4boxfile.onError = (e) => {
+            console.error('MP4Box error during demuxing:', e);
+            reject(new Error(`Failed to parse MP4 file: ${e}`));
+        };
+
     mp4boxfile.onSamples = (track_id, _user, samples) => {
         if (track_id === videoTrackId) {
             for (const sample of samples) {
