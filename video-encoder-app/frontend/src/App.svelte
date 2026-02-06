@@ -73,6 +73,20 @@
   // Reactive current QP value for display
   $: currentQP = (qpPreset, qpValue, calculateQP());
   
+  // Reactive audio codec description
+  $: audioCodecDescription = (() => {
+    if (audioCodec === 'mp4a.40.2') {
+      return 'AAC-LC: 最も互換性の高い音声コーデック。推奨。';
+    } else if (audioCodec === 'mp4a.40.5') {
+      return 'AAC-HE: 低ビットレートで高品質。音楽向け。';
+    } else if (audioCodec === 'mp4a.40.29') {
+      return 'AAC-HE v2: 超低ビットレート用。音声コンテンツ向け。';
+    } else if (audioCodec === 'opus') {
+      return 'Opus: WebM用の高品質コーデック。低遅延。';
+    }
+    return '';
+  })();
+  
   // Advanced WebCodecs configuration options
   let hardwareAcceleration = 'no-preference'; // 'no-preference', 'prefer-hardware', 'prefer-software'
   let scalabilityMode = ''; // e.g., 'L1T2', 'L1T3' for temporal scalability (empty = not used)
@@ -1469,15 +1483,7 @@
         </div>
         
         <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
-          {#if audioCodec === 'mp4a.40.2'}
-            AAC-LC: 最も互換性の高い音声コーデック。推奨。
-          {:else if audioCodec === 'mp4a.40.5'}
-            AAC-HE: 低ビットレートで高品質。音楽向け。
-          {:else if audioCodec === 'mp4a.40.29'}
-            AAC-HE v2: 超低ビットレート用。音声コンテンツ向け。
-          {:else if audioCodec === 'opus'}
-            Opus: WebM用の高品質コーデック。低遅延。
-          {/if}
+          {audioCodecDescription}
           {#if bitrateMode === 'quantizer'}
             <br/>※ 音声エンコーダーはQP（量子化パラメータ）をサポートしていません。ビットレート指定のみ可能です。
           {/if}
