@@ -37,10 +37,16 @@ export async function encodeToFile(file, config, onProgress, signal) {
     const fileExtension = container === 'webm' ? '.webm' : (container === 'mov' ? '.mov' : '.mp4');
     const mimeType = container === 'webm' ? 'video/webm' : 'video/mp4';
     
-    // Generate output filename based on original file and bitrate
+    // Generate output filename based on original file and bitrate/quality mode
     const originalNameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
-    const videoBitrateMbps = (config.video.bitrate / 1000000).toFixed(1);
-    const suggestedName = `${originalNameWithoutExt}_${videoBitrateMbps}Mbps${fileExtension}`;
+    let qualityIndicator;
+    if (config.video.bitrateMode === 'quantizer' && config.video.quantizer !== undefined) {
+        qualityIndicator = `QP${config.video.quantizer}`;
+    } else {
+        const videoBitrateMbps = (config.video.bitrate / 1000000).toFixed(1);
+        qualityIndicator = `${videoBitrateMbps}Mbps`;
+    }
+    const suggestedName = `${originalNameWithoutExt}_${qualityIndicator}${fileExtension}`;
     
     // Check if File System Access API is supported (not available in Firefox)
     const supportsFileSystemAccess = 'showSaveFilePicker' in window;

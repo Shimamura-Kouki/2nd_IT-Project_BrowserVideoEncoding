@@ -332,41 +332,46 @@
       // For AAC: only 4 valid values [96, 128, 160, 192] Kbps
       // For Opus: can use 5 levels [64, 96, 128, 160, 192] Kbps
       
-      let targetBitrate: number;
-      
-      // Determine which codec will be used
-      let effectiveAudioCodec = audioCodec;
-      if (containerFormat === 'mp4') {
-        effectiveAudioCodec = 'mp4a.40.2'; // Always AAC-LC for MP4
-      }
-      
-      if (effectiveAudioCodec === 'opus') {
-        // Opus supports 5 levels
-        switch (audioQualityLevel) {
-          case '最高': targetBitrate = 192_000; break;
-          case '高': targetBitrate = 160_000; break;
-          case '中': targetBitrate = 128_000; break;
-          case '低': targetBitrate = 96_000; break;
-          case '最低': targetBitrate = 64_000; break;
-          default: targetBitrate = 128_000;
-        }
-      } else if (effectiveAudioCodec.startsWith('mp4a')) {
-        // AAC supports only 4 levels: [96, 128, 160, 192] Kbps
-        // Map 5 quality levels to 4 bitrate values
-        switch (audioQualityLevel) {
-          case '最高': targetBitrate = 192_000; break;
-          case '高': targetBitrate = 160_000; break;
-          case '中': targetBitrate = 128_000; break;
-          case '低': targetBitrate = 96_000; break;
-          case '最低': targetBitrate = 96_000; break; // AAC minimum is 96
-          default: targetBitrate = 128_000;
-        }
+      // Check if custom audio bitrate is selected
+      if (audioQualityLevel === 'カスタム') {
+        result = customAudioBitrate * 1000;
       } else {
-        // Fallback to 128 Kbps
-        targetBitrate = 128_000;
+        let targetBitrate: number;
+        
+        // Determine which codec will be used
+        let effectiveAudioCodec = audioCodec;
+        if (containerFormat === 'mp4') {
+          effectiveAudioCodec = 'mp4a.40.2'; // Always AAC-LC for MP4
+        }
+        
+        if (effectiveAudioCodec === 'opus') {
+          // Opus supports 5 levels
+          switch (audioQualityLevel) {
+            case '最高': targetBitrate = 192_000; break;
+            case '高': targetBitrate = 160_000; break;
+            case '中': targetBitrate = 128_000; break;
+            case '低': targetBitrate = 96_000; break;
+            case '最低': targetBitrate = 64_000; break;
+            default: targetBitrate = 128_000;
+          }
+        } else if (effectiveAudioCodec.startsWith('mp4a')) {
+          // AAC supports only 4 levels: [96, 128, 160, 192] Kbps
+          // Map 5 quality levels to 4 bitrate values
+          switch (audioQualityLevel) {
+            case '最高': targetBitrate = 192_000; break;
+            case '高': targetBitrate = 160_000; break;
+            case '中': targetBitrate = 128_000; break;
+            case '低': targetBitrate = 96_000; break;
+            case '最低': targetBitrate = 96_000; break; // AAC minimum is 96
+            default: targetBitrate = 128_000;
+          }
+        } else {
+          // Fallback to 128 Kbps
+          targetBitrate = 128_000;
+        }
+        
+        result = targetBitrate;
       }
-      
-      result = targetBitrate;
     } else {
       // Video bitrate: Calculate from base rate with quality multiplier
       let multiplier = 1.0;
@@ -1363,8 +1368,16 @@
             <option value="中">中 (128Kbps) - 推奨</option>
             <option value="低">低 (96Kbps)</option>
             <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
+            <option value="カスタム">カスタム</option>
           </select>
         </div>
+        
+        {#if audioQualityLevel === 'カスタム'}
+          <div class="row">
+            <label>音声ビットレート (Kbps):</label>
+            <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
+          </div>
+        {/if}
       {:else}
         <div class="row">
           <label>ビットレート品質:</label>
@@ -1460,11 +1473,11 @@
         </div>
         
         <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
-          {#if audioCodec.startsWith('mp4a.40.2')}
+          {#if audioCodec === 'mp4a.40.2'}
             AAC-LC: 最も互換性の高い音声コーデック。推奨。
-          {:else if audioCodec.startsWith('mp4a.40.5')}
+          {:else if audioCodec === 'mp4a.40.5'}
             AAC-HE: 低ビットレートで高品質。音楽向け。
-          {:else if audioCodec.startsWith('mp4a.40.29')}
+          {:else if audioCodec === 'mp4a.40.29'}
             AAC-HE v2: 超低ビットレート用。音声コンテンツ向け。
           {:else if audioCodec === 'opus'}
             Opus: WebM用の高品質コーデック。低遅延。
