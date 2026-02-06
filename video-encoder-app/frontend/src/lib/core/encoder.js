@@ -410,6 +410,7 @@ export async function encodeToFile(file, config, onProgress, signal) {
             const fps = frameCount / (elapsedMs / 1000);
             
             // Calculate encoding progress: 0-100% based on frames processed vs total frames
+            // Default to 0 if totalFrames is unknown (shouldn't happen in normal operation)
             let encodingProgress = 0;
             if (totalFrames > 0) {
                 encodingProgress = (frameCount / totalFrames) * 100;
