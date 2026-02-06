@@ -1478,7 +1478,9 @@
           {:else if audioCodec === 'opus'}
             Opus: WebM用の高品質コーデック。低遅延。
           {/if}
-          <br/>※ 音声エンコーダーはQP（量子化パラメータ）をサポートしていません。ビットレート指定のみ可能です。
+          {#if bitrateMode === 'quantizer'}
+            <br/>※ 音声エンコーダーはQP（量子化パラメータ）をサポートしていません。ビットレート指定のみ可能です。
+          {/if}
         </p>
         
         <div class="row">
