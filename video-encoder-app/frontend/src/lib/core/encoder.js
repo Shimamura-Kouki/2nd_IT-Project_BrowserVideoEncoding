@@ -64,6 +64,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let muxer = null;
     let videoEncoder = null;
     let audioEncoder = null;
+    let videoDecoder = null;
+    let audioDecoder = null;
     
     // Track abort status
     let aborted = false;
@@ -71,12 +73,14 @@ export async function encodeToFile(file, config, onProgress, signal) {
     // Cleanup function to handle cancellation
     const cleanup = async () => {
         aborted = true;
+        console.log('Cleanup initiated - aborting encoding process');
         try {
-            // Close encoders - check both existence and state
+            // Close encoders immediately to stop GPU processing
             if (videoEncoder) {
                 try {
-                    if (videoEncoder.state === 'configured' || videoEncoder.state === 'unconfigured') {
+                    if (videoEncoder.state !== 'closed') {
                         videoEncoder.close();
+                        console.log('Video encoder closed');
                     }
                 } catch (e) {
                     console.error('Error closing video encoder:', e);
@@ -84,17 +88,40 @@ export async function encodeToFile(file, config, onProgress, signal) {
             }
             if (audioEncoder) {
                 try {
-                    if (audioEncoder.state === 'configured' || audioEncoder.state === 'unconfigured') {
+                    if (audioEncoder.state !== 'closed') {
                         audioEncoder.close();
+                        console.log('Audio encoder closed');
                     }
                 } catch (e) {
                     console.error('Error closing audio encoder:', e);
+                }
+            }
+            // Close decoders to stop frame processing
+            if (videoDecoder) {
+                try {
+                    if (videoDecoder.state !== 'closed') {
+                        videoDecoder.close();
+                        console.log('Video decoder closed');
+                    }
+                } catch (e) {
+                    console.error('Error closing video decoder:', e);
+                }
+            }
+            if (audioDecoder) {
+                try {
+                    if (audioDecoder.state !== 'closed') {
+                        audioDecoder.close();
+                        console.log('Audio decoder closed');
+                    }
+                } catch (e) {
+                    console.error('Error closing audio decoder:', e);
                 }
             }
             // Close the file stream
             if (fileStream) {
                 try {
                     await fileStream.abort();
+                    console.log('File stream aborted');
                 } catch (e) {
                     console.error('Error aborting file stream:', e);
                 }
@@ -298,6 +325,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
                     numberOfChannels: audioFormat.numberOfChannels,
                     bitrate: audioBitrate
                 });
+                
+                // Verify encoder entered configured state
+                if (audioEncoder.state !== 'configured') {
+                    throw new Error(`AudioEncoder failed to configure, state is ${audioEncoder.state}`);
+                }
+                
                 console.log(`AudioEncoder configured successfully, state=${audioEncoder.state}`);
                 audioEncoderReady = true;
             } catch (e) {
@@ -400,8 +433,14 @@ export async function encodeToFile(file, config, onProgress, signal) {
         });
     };
 
-    const videoDecoder = new VideoDecoder({
+    videoDecoder = new VideoDecoder({
         output: (frame) => {
+            // Check if aborted and skip processing
+            if (aborted || (signal && signal.aborted)) {
+                frame.close();
+                return;
+            }
+            
             frameCount++;
             if (videoEncoder && videoEncoder.state === 'configured') {
                 try {
@@ -436,8 +475,14 @@ export async function encodeToFile(file, config, onProgress, signal) {
         error: (e) => console.error('VideoDecoder error', e)
     });
 
-    const audioDecoder = new AudioDecoder({
+    audioDecoder = new AudioDecoder({
         output: (audioData) => {
+            // Check if aborted and skip processing
+            if (aborted || (signal && signal.aborted)) {
+                audioData.close();
+                return;
+            }
+            
             audioDecoderFrameCount++;
             // Log first few frames for debugging
             if (audioDecoderFrameCount <= 3) {
@@ -493,9 +538,16 @@ export async function encodeToFile(file, config, onProgress, signal) {
             // Flush encoder to finalize all queued audio frames
             // Note: AudioEncoder output callbacks are asynchronous, so totalAudioChunksReceived
             // may still be 0 even if frames have been queued. Always flush if encoder is configured.
+            console.log('Flushing audio encoder...');
             await audioEncoder.flush();
+            console.log('Audio encoder flushed successfully');
         } catch (e) {
             console.error('AudioEncoder flush error:', e);
+            // Don't throw - continue encoding even if audio flush fails
+            // This prevents the entire encoding from failing due to audio issues
+            if (e.name === 'EncodingError') {
+                console.warn('Audio encoding error detected - output may have incomplete audio');
+            }
         }
     } else if (audioEncoder) {
         console.warn(`Skipping audio encoder flush: encoder state is '${audioEncoder.state}' (expected 'configured')`);
