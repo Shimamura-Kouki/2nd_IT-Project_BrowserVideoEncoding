@@ -70,6 +70,9 @@
   let qpValue = 28; // Default QP value (lower = higher quality, typical range: 0-51 for H.264/H.265)
   let qpPreset = '中'; // 最高, 高, 中, 低, 最低, カスタム
   
+  // Reactive current QP value for display
+  $: currentQP = calculateQP();
+  
   // Advanced WebCodecs configuration options
   let hardwareAcceleration = 'no-preference'; // 'no-preference', 'prefer-hardware', 'prefer-software'
   let scalabilityMode = ''; // e.g., 'L1T2', 'L1T3' for temporal scalability (empty = not used)
@@ -90,13 +93,6 @@
     if (containerFormat === 'mp4' && !audioCodec.startsWith('mp4a')) {
       // If we have opus in MP4, switch to AAC-LC (MP4 doesn't support opus)
       audioCodec = 'mp4a.40.2';
-    }
-    
-    // Always use AAC-LC for MP4 containers (not HE-AAC or HE-AAC v2)
-    if (containerFormat === 'mp4') {
-      if (audioCodec.startsWith('mp4a.40.5') || audioCodec.startsWith('mp4a.40.29')) {
-        audioCodec = 'mp4a.40.2';
-      }
     } else if (containerFormat === 'webm' && audioCodec.startsWith('mp4a')) {
       // If we switched to WebM but still have AAC, switch to Opus
       audioCodec = 'opus';
@@ -1219,7 +1215,7 @@
               audioCodec
             }</p>
             {#if bitrateMode === 'quantizer'}
-              <p style="margin: 4px 0;"><strong>出力映像品質:</strong> QP={calculateQP()} (低いほど高品質)</p>
+              <p style="margin: 4px 0;"><strong>出力映像品質:</strong> QP={currentQP} (低いほど高品質)</p>
             {:else}
               <p style="margin: 4px 0;"><strong>出力映像ビットレート:</strong> {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps</p>
             {/if}
