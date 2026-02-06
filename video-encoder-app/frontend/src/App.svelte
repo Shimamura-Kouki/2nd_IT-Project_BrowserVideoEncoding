@@ -69,6 +69,11 @@
   // QP (Quantization Parameter) settings for quantizer mode
   let qpValue = 28; // Default QP value (lower = higher quality, typical range: 0-51 for H.264/H.265)
   let qpPreset = '中'; // 最高, 高, 中, 低, 最低, カスタム
+  
+  // Advanced WebCodecs configuration options
+  let hardwareAcceleration = 'no-preference'; // 'no-preference', 'prefer-hardware', 'prefer-software'
+  let scalabilityMode = ''; // e.g., 'L1T2', 'L1T3' for temporal scalability (empty = not used)
+  let alphaMode = 'discard'; // 'discard', 'keep' for alpha channel handling
 
   // Auto-change container based on video codec selection only (to avoid cycles)
   $: {
@@ -613,6 +618,9 @@
     audioQualityLevel = '中';
     customVideoBitrate = 5000;
     customAudioBitrate = 128;
+    hardwareAcceleration = 'no-preference';
+    scalabilityMode = '';
+    alphaMode = 'discard';
     showDetailedSettings = false;
     message = '設定をリセットしました';
   }
@@ -673,7 +681,10 @@
           bitrateMode: bitrateMode,
           quantizer: videoQP,
           framerate: framerate,
-          framerateMode: framerateMode
+          framerateMode: framerateMode,
+          hardwareAcceleration: hardwareAcceleration,
+          scalabilityMode: scalabilityMode || undefined,
+          alpha: alphaMode
         },
         audio: { 
           codec: audioCodec, 
@@ -1484,6 +1495,62 @@
             <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ フレームレートを元ファイル({originalFramerate.toFixed(1)}fps)より高く設定しても品質は向上しません</p>
           {/if}
         {/if}
+        
+        <h3 class="section-title" style="margin-top: 20px;">高度なエンコード設定</h3>
+        
+        <div class="row">
+          <label>ハードウェアアクセラレーション:</label>
+          <select bind:value={hardwareAcceleration}>
+            <option value="no-preference">自動選択</option>
+            <option value="prefer-hardware">ハードウェア優先 (GPU使用)</option>
+            <option value="prefer-software">ソフトウェア優先 (CPU使用)</option>
+          </select>
+        </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {#if hardwareAcceleration === 'no-preference'}
+            ブラウザが自動的に最適な方法を選択します
+          {:else if hardwareAcceleration === 'prefer-hardware'}
+            GPUを使用して高速にエンコード (非対応の場合はCPUを使用)
+          {:else if hardwareAcceleration === 'prefer-software'}
+            CPUを使用してエンコード (互換性重視)
+          {/if}
+        </p>
+        
+        <div class="row">
+          <label>スケーラビリティモード:</label>
+          <select bind:value={scalabilityMode}>
+            <option value="">使用しない</option>
+            <option value="L1T2">L1T2 (2層時間スケーラビリティ)</option>
+            <option value="L1T3">L1T3 (3層時間スケーラビリティ)</option>
+          </select>
+        </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {#if scalabilityMode === ''}
+            標準的なエンコード (推奨)
+          {:else if scalabilityMode === 'L1T2'}
+            時間的スケーラビリティを有効化 (ストリーミング向け)
+          {:else if scalabilityMode === 'L1T3'}
+            3層時間的スケーラビリティ (高度なストリーミング向け)
+          {/if}
+        </p>
+        
+        <div class="row">
+          <label>アルファチャンネル:</label>
+          <select bind:value={alphaMode}>
+            <option value="discard">破棄 (透明度なし)</option>
+            <option value="keep">保持 (透明度あり)</option>
+          </select>
+        </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {#if alphaMode === 'discard'}
+            アルファチャンネルを破棄 (通常の動画)
+          {:else}
+            アルファチャンネルを保持 (透明度付き動画)
+          {/if}
+        </p>
       </div>
     {/if}
 

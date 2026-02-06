@@ -434,7 +434,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
             // Use quantizer if in quantizer mode, otherwise use bitrate
             ...(config.video.bitrateMode === 'quantizer' && config.video.quantizer !== undefined 
                 ? { quantizer: config.video.quantizer }
-                : {})
+                : {}),
+            // Add advanced options if specified
+            hardwareAcceleration: config.video.hardwareAcceleration ?? 'no-preference',
+            ...(config.video.scalabilityMode ? { scalabilityMode: config.video.scalabilityMode } : {}),
+            alpha: config.video.alpha ?? 'discard'
         });
     };
 
