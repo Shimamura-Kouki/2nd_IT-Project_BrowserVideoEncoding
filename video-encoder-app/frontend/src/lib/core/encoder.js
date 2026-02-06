@@ -15,6 +15,11 @@ class ArrayBufferTarget {
     }
 }
 
+// Overall progress allocation: loading contributes 10%, encoding contributes 90%
+// Note: Separate loading and encoding progress bars still show 0-100% independently
+const OVERALL_LOADING_WEIGHT = 10;
+const OVERALL_ENCODING_WEIGHT = 90;
+
 /**
  * ブラウザ内でエンコードし、FileSystem APIへストリーム保存
  * @param {File} file
@@ -424,8 +429,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 etaMs = estimatedTotalMs - elapsedMs;
             }
             
-            // Calculate overall progress: combination of loading (100%) and encoding (0-100%)
-            const overallProgress = (100 + encodingProgress) / 2;
+            // Overall progress: loading is complete (10%), encoding contributes 0-90%
+            const overallProgress = OVERALL_LOADING_WEIGHT + (encodingProgress / 100) * OVERALL_ENCODING_WEIGHT;
             onProgress({ loading: 100, encoding: encodingProgress, overall: overallProgress }, { fps, elapsedMs, etaMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
@@ -461,8 +466,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
 
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => {
         // Demuxing/loading progress (0-100%), encoding hasn't started yet (0%)
-        // Overall progress: combination of loading and encoding (0-50% during loading phase)
-        const overallProgress = pct / 2;
+        // Overall progress: loading contributes 0-10% of total
+        const overallProgress = (pct / 100) * OVERALL_LOADING_WEIGHT;
         onProgress({ loading: pct, encoding: 0, overall: overallProgress });
     });
 
