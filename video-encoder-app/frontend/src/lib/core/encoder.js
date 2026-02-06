@@ -15,10 +15,6 @@ class ArrayBufferTarget {
     }
 }
 
-// Progress contribution: demuxing contributes 10% of total progress, encoding 90%
-const DEMUX_PROGRESS_PERCENTAGE = 10;
-const ENCODING_PROGRESS_PERCENTAGE = 100 - DEMUX_PROGRESS_PERCENTAGE;
-
 /**
  * ブラウザ内でエンコードし、FileSystem APIへストリーム保存
  * @param {File} file
@@ -413,11 +409,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
             const elapsedMs = performance.now() - start;
             const fps = frameCount / (elapsedMs / 1000);
             
-            // Calculate progress: DEMUX_PROGRESS_PERCENTAGE for demuxing (already done) + remaining for encoding
-            // Encoding progress is based on frames processed vs total frames
-            let encodingProgress = DEMUX_PROGRESS_PERCENTAGE; // Start at demuxing complete
+            // Calculate encoding progress: 0-100% based on frames processed vs total frames
+            let encodingProgress = 0;
             if (totalFrames > 0) {
-                encodingProgress = DEMUX_PROGRESS_PERCENTAGE + (frameCount / totalFrames) * ENCODING_PROGRESS_PERCENTAGE;
+                encodingProgress = (frameCount / totalFrames) * 100;
             }
             
             // Calculate estimated time to completion (ETA)
@@ -428,8 +423,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 etaMs = estimatedTotalMs - elapsedMs;
             }
             
-            // Calculate overall progress and separate encoding progress
-            const overallProgress = DEMUX_PROGRESS_PERCENTAGE + encodingProgress * (ENCODING_PROGRESS_PERCENTAGE / 100);
+            // Calculate overall progress: combination of loading (100%) and encoding (0-100%)
+            const overallProgress = (100 + encodingProgress) / 2;
             onProgress({ loading: 100, encoding: encodingProgress, overall: overallProgress }, { fps, elapsedMs, etaMs });
         },
         error: (e) => console.error('VideoDecoder error', e)
@@ -464,8 +459,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     });
 
     const demuxResult = await demuxAndDecode(file, videoDecoder, audioDecoder, initializeEncoders, (pct) => {
-        // Demuxing/loading progress (0-100% maps to 0-10% of overall progress)
-        const overallProgress = pct * (DEMUX_PROGRESS_PERCENTAGE / 100);
+        // Demuxing/loading progress (0-100%), encoding hasn't started yet (0%)
+        // Overall progress: combination of loading and encoding (0-50% during loading phase)
+        const overallProgress = pct / 2;
         onProgress({ loading: pct, encoding: 0, overall: overallProgress });
     });
 
