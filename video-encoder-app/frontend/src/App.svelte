@@ -60,14 +60,41 @@
   let framerate = 30;
   
   // Bitrate settings - quality-based
-  let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム
+  let bitrateMode = 'quantizer'; // 'constant', 'variable', 'quantizer' (QP mode is default)
+  let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム (for bitrate mode)
   let audioQualityLevel = '中'; // 最高, 高, 中, 低, 最低
-  let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム'
+  let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム' in bitrate mode
   let customAudioBitrate = 128; // in Kbps, used when qualityLevel is 'カスタム'
+  
+  // QP (Quantization Parameter) settings for quantizer mode
+  let qpValue = 28; // Default QP value (lower = higher quality, typical range: 0-51 for H.264/H.265)
+  let qpPreset = '中'; // 最高, 高, 中, 低, 最低, カスタム
+  
+  // Reactive current QP value for display
+  $: currentQP = (qpPreset, qpValue, calculateQP());
+  
+  // Reactive audio codec description
+  $: audioCodecDescription = (() => {
+    if (audioCodec === 'mp4a.40.2') {
+      return 'AAC-LC: 最も互換性の高い音声コーデック。推奨。';
+    } else if (audioCodec === 'mp4a.40.5') {
+      return 'AAC-HE: 低ビットレートで高品質。音楽向け。';
+    } else if (audioCodec === 'mp4a.40.29') {
+      return 'AAC-HE v2: 超低ビットレート用。音声コンテンツ向け。';
+    } else if (audioCodec === 'opus') {
+      return 'Opus: WebM用の高品質コーデック。低遅延。';
+    }
+    return '';
+  })();
+  
+  // Advanced WebCodecs configuration options
+  let hardwareAcceleration = 'no-preference'; // 'no-preference', 'prefer-hardware', 'prefer-software'
+  let scalabilityMode = ''; // e.g., 'L1T2', 'L1T3' for temporal scalability (empty = not used)
+  let alphaMode = 'discard'; // 'discard', 'keep' for alpha channel handling
 
   // Auto-change container based on video codec selection only (to avoid cycles)
   $: {
-    if (videoCodec.startsWith('vp09') || videoCodec.startsWith('vp08') || videoCodec.startsWith('av01')) {
+    if (videoCodec.startsWith('vp09') || videoCodec.startsWith('vp08') || videoCodec.startsWith('vp8') || videoCodec.startsWith('av01')) {
       containerFormat = 'webm';
     } else if (videoCodec.startsWith('avc1') || videoCodec.startsWith('hev1') || videoCodec.startsWith('hvc1')) {
       containerFormat = 'mp4';
@@ -76,20 +103,21 @@
 
   // Auto-switch audio codec based on container format
   $: {
-    // Only auto-switch for MP4 containers to avoid opus conflicts
+    // Only auto-switch for MP4 containers to avoid codec conflicts
     if (containerFormat === 'mp4' && !audioCodec.startsWith('mp4a')) {
-      // If somehow we have opus in MP4, switch to AAC-LC
+      // If we have opus in MP4, switch to AAC-LC (MP4 doesn't support opus)
       audioCodec = 'mp4a.40.2';
-    }
-    
-    // Always use AAC-LC for MP4 containers
-    if (containerFormat === 'mp4') {
-      if (audioCodec.startsWith('mp4a.40.5')) {
-        audioCodec = 'mp4a.40.2';
-      }
     } else if (containerFormat === 'webm' && audioCodec.startsWith('mp4a')) {
       // If we switched to WebM but still have AAC, switch to Opus
       audioCodec = 'opus';
+    }
+  }
+  
+  // Auto-switch bitrate mode for VP8 (VP8 doesn't support quantizer mode)
+  $: {
+    if (videoCodec === 'vp8' && bitrateMode === 'quantizer') {
+      bitrateMode = 'variable';
+      console.log('VP8 does not support quantizer mode, switching to variable bitrate mode');
     }
   }
 
@@ -266,6 +294,26 @@
     }
   };
 
+  // Calculate QP value based on preset
+  function calculateQP(): number {
+    if (qpPreset === 'カスタム') {
+      return qpValue;
+    }
+    
+    // QP presets for H.264/H.265/VP9/AV1
+    // Lower QP = Higher Quality (typical range: 0-51 for H.264/H.265, 0-63 for VP9/AV1)
+    // For H.264/H.265: recommended range 18-28 for good quality
+    // For VP9/AV1: similar but can go higher
+    switch (qpPreset) {
+      case '最高': return 18; // Excellent quality
+      case '高': return 23;   // High quality
+      case '中': return 28;   // Medium quality (balanced)
+      case '低': return 33;   // Low quality
+      case '最低': return 38; // Minimum quality
+      default: return 28;
+    }
+  }
+
   // Calculate bitrate based on quality level and codec
   function calculateBitrate(isVideo: boolean): number {
     const baseRate = isVideo ? originalVideoBitrate : originalAudioBitrate;
@@ -294,41 +342,46 @@
       // For AAC: only 4 valid values [96, 128, 160, 192] Kbps
       // For Opus: can use 5 levels [64, 96, 128, 160, 192] Kbps
       
-      let targetBitrate: number;
-      
-      // Determine which codec will be used
-      let effectiveAudioCodec = audioCodec;
-      if (containerFormat === 'mp4') {
-        effectiveAudioCodec = 'mp4a.40.2'; // Always AAC-LC for MP4
-      }
-      
-      if (effectiveAudioCodec === 'opus') {
-        // Opus supports 5 levels
-        switch (audioQualityLevel) {
-          case '最高': targetBitrate = 192_000; break;
-          case '高': targetBitrate = 160_000; break;
-          case '中': targetBitrate = 128_000; break;
-          case '低': targetBitrate = 96_000; break;
-          case '最低': targetBitrate = 64_000; break;
-          default: targetBitrate = 128_000;
-        }
-      } else if (effectiveAudioCodec.startsWith('mp4a')) {
-        // AAC supports only 4 levels: [96, 128, 160, 192] Kbps
-        // Map 5 quality levels to 4 bitrate values
-        switch (audioQualityLevel) {
-          case '最高': targetBitrate = 192_000; break;
-          case '高': targetBitrate = 160_000; break;
-          case '中': targetBitrate = 128_000; break;
-          case '低': targetBitrate = 96_000; break;
-          case '最低': targetBitrate = 96_000; break; // AAC minimum is 96
-          default: targetBitrate = 128_000;
-        }
+      // Check if custom audio bitrate is selected
+      if (audioQualityLevel === 'カスタム') {
+        result = customAudioBitrate * 1000;
       } else {
-        // Fallback to 128 Kbps
-        targetBitrate = 128_000;
+        let targetBitrate: number;
+        
+        // Determine which codec will be used
+        let effectiveAudioCodec = audioCodec;
+        if (containerFormat === 'mp4') {
+          effectiveAudioCodec = 'mp4a.40.2'; // Always AAC-LC for MP4
+        }
+        
+        if (effectiveAudioCodec === 'opus') {
+          // Opus supports 5 levels
+          switch (audioQualityLevel) {
+            case '最高': targetBitrate = 192_000; break;
+            case '高': targetBitrate = 160_000; break;
+            case '中': targetBitrate = 128_000; break;
+            case '低': targetBitrate = 96_000; break;
+            case '最低': targetBitrate = 64_000; break;
+            default: targetBitrate = 128_000;
+          }
+        } else if (effectiveAudioCodec.startsWith('mp4a')) {
+          // AAC supports only 4 levels: [96, 128, 160, 192] Kbps
+          // Map 5 quality levels to 4 bitrate values
+          switch (audioQualityLevel) {
+            case '最高': targetBitrate = 192_000; break;
+            case '高': targetBitrate = 160_000; break;
+            case '中': targetBitrate = 128_000; break;
+            case '低': targetBitrate = 96_000; break;
+            case '最低': targetBitrate = 96_000; break; // AAC minimum is 96
+            default: targetBitrate = 128_000;
+          }
+        } else {
+          // Fallback to 128 Kbps
+          targetBitrate = 128_000;
+        }
+        
+        result = targetBitrate;
       }
-      
-      result = targetBitrate;
     } else {
       // Video bitrate: Calculate from base rate with quality multiplier
       let multiplier = 1.0;
@@ -445,12 +498,37 @@
       videoCodec = preset.codec ?? 'avc1.640028';
       audioCodec = preset.audioCodec ?? 'mp4a.40.2';
       
-      // Set quality level based on preset bitrate
-      if (preset.preserveOriginal) {
-        qualityLevel = '高'; // Default quality for preserve presets
+      // Apply bitrate mode and quality settings
+      bitrateMode = preset.bitrateMode ?? 'quantizer';
+      
+      if (bitrateMode === 'quantizer') {
+        // QP mode - set QP preset based on quantizer value
+        if (preset.quantizer !== undefined) {
+          if (preset.quantizer <= 18) {
+            qpPreset = '最高';
+          } else if (preset.quantizer <= 23) {
+            qpPreset = '高';
+          } else if (preset.quantizer <= 28) {
+            qpPreset = '中';
+          } else if (preset.quantizer <= 33) {
+            qpPreset = '低';
+          } else {
+            qpPreset = '最低';
+          }
+          qpValue = preset.quantizer;
+        } else {
+          qpPreset = '中';
+          qpValue = 28;
+        }
       } else {
-        qualityLevel = '中'; // Default quality for standard presets
+        // Bitrate mode - set quality level
+        if (preset.preserveOriginal) {
+          qualityLevel = '高'; // Default quality for preserve presets
+        } else {
+          qualityLevel = '中'; // Default quality for standard presets
+        }
       }
+      
       customVideoBitrate = (preset.bitrate ?? 5_000_000) / 1000;
       customAudioBitrate = (preset.audio_bitrate ?? 128_000) / 1000;
       framerate = preset.framerate ?? 30;
@@ -556,10 +634,16 @@
     heightOnly = 1080;
     framerateMode = 'manual';
     framerate = 30;
+    bitrateMode = 'quantizer';
+    qpPreset = '中';
+    qpValue = 28;
     qualityLevel = '中';
     audioQualityLevel = '中';
     customVideoBitrate = 5000;
     customAudioBitrate = 128;
+    hardwareAcceleration = 'no-preference';
+    scalabilityMode = '';
+    alphaMode = 'discard';
     showDetailedSettings = false;
     message = '設定をリセットしました';
   }
@@ -608,6 +692,7 @@
 
       const videoBitrate = calculateBitrate(true);
       const audioBitrate = calculateBitrate(false);
+      const videoQP = calculateQP();
 
       const config = {
         video: { 
@@ -616,8 +701,13 @@
           width: width, 
           height: height, 
           bitrate: videoBitrate, 
+          bitrateMode: bitrateMode,
+          quantizer: videoQP,
           framerate: framerate,
-          framerateMode: framerateMode
+          framerateMode: framerateMode,
+          hardwareAcceleration: hardwareAcceleration,
+          scalabilityMode: scalabilityMode,
+          alpha: alphaMode
         },
         audio: { 
           codec: audioCodec, 
@@ -1127,17 +1217,27 @@
               videoCodec.startsWith('hev1') ? 'H.265 (hev1)' :
               videoCodec.startsWith('hvc1') ? 'H.265 (hvc1)' :
               videoCodec.startsWith('vp09') ? 'VP9' :
+              videoCodec.startsWith('vp8') ? 'VP8' :
               videoCodec.startsWith('av01') ? 'AV1' :
               videoCodec
             }</p>
             <p style="margin: 4px 0;"><strong>出力音声コーデック:</strong> {
               audioCodec === 'mp4a.40.2' ? 'AAC-LC' :
               audioCodec === 'mp4a.40.5' ? 'AAC-HE' :
+              audioCodec === 'mp4a.40.29' ? 'AAC-HE v2' :
               audioCodec === 'opus' ? 'Opus' :
               audioCodec
             }</p>
-            <p style="margin: 4px 0;"><strong>出力映像ビットレート:</strong> {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps</p>
+            {#if bitrateMode === 'quantizer'}
+              <p style="margin: 4px 0;"><strong>出力映像品質:</strong> QP={currentQP} (低いほど高品質)</p>
+            {:else}
+              <p style="margin: 4px 0;"><strong>出力映像ビットレート:</strong> {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps</p>
+            {/if}
             <p style="margin: 4px 0;"><strong>出力音声ビットレート:</strong> {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps</p>
+            <p style="color: #888; font-size: 11px; margin: 4px 0;">※ 音声エンコーダーはQPモードをサポートしていません（ビットレート指定のみ）</p>
+            {#if bitrateMode === 'quantizer'}
+              <p style="color: #888; font-size: 11px; margin: 4px 0;">※ QPモードでは映像ビットレートは推定できません</p>
+            {/if}
           </div>
         {/if}
       </div>
@@ -1158,59 +1258,118 @@
         <label>コーデック:</label>
         <select bind:value={videoCodec} style="flex: 1;">
           <optgroup label="H.264 (AVC)">
-            <option value="avc1.640028">H.264 High (最高画質・互換性良)</option>
-            <option value="avc1.4d001f">H.264 Main (高画質・互換性最良)</option>
-            <option value="avc1.42001f">H.264 Baseline L3.1 (標準画質・旧デバイス対応)</option>
-            <option value="avc1.42001e">H.264 Baseline L3.0 (低解像度・最高互換性)</option>
+            <option value="avc1.640028">H.264 High L4.0 (最高画質・互換性良)</option>
+            <option value="avc1.64001f">H.264 High L3.1 (高画質・標準)</option>
+            <option value="avc1.64001e">H.264 High L3.0 (高画質・低解像度)</option>
+            <option value="avc1.4d0028">H.264 Main L4.0 (高画質・互換性最良)</option>
+            <option value="avc1.4d001f">H.264 Main L3.1 (標準・高互換性)</option>
+            <option value="avc1.4d001e">H.264 Main L3.0 (低解像度・最高互換性)</option>
+            <option value="avc1.42001f">H.264 Baseline L3.1 (旧デバイス対応)</option>
+            <option value="avc1.42001e">H.264 Baseline L3.0 (最高互換性)</option>
           </optgroup>
           <optgroup label="H.265 (HEVC)">
-            <option value="hev1.1.6.L93.B0">H.265 Main (高効率・新デバイス)</option>
-            <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 (Apple互換性向上)</option>
+            <option value="hev1.1.6.L93.B0">H.265 Main L3.1 (高効率・新デバイス)</option>
+            <option value="hev1.1.6.L90.B0">H.265 Main L3.0 (高効率・標準)</option>
+            <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 L3.1 (Apple互換性向上)</option>
+            <option value="hvc1.1.6.L90.B0">H.265 Main hvc1 L3.0 (Apple互換性)</option>
+            <option value="hev1.1.6.L120.B0">H.265 Main L4.0 (高解像度・4K)</option>
           </optgroup>
           <optgroup label="VP9">
-            <option value="vp09.00.31.08">VP9 Profile 0 (WebM標準)</option>
-            <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (高解像度対応)</option>
+            <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (4K対応・推奨)</option>
+            <option value="vp09.00.31.08">VP9 Profile 0 L3.1 (FHD対応)</option>
+            <option value="vp09.00.21.08">VP9 Profile 0 L2.1 (HD対応)</option>
+            <option value="vp09.02.10.10">VP9 Profile 2 10bit (高品質・HDR)</option>
           </optgroup>
           <optgroup label="AV1">
             <option value="av01.0.05M.08">AV1 Main L3.1 (最新・高効率)</option>
             <option value="av01.0.04M.08">AV1 Main L3.0 (標準解像度)</option>
+            <option value="av01.0.08M.08">AV1 Main L4.0 (4K対応)</option>
+            <option value="av01.0.09M.08">AV1 Main L4.1 (4K・高フレームレート)</option>
+          </optgroup>
+          <optgroup label="VP8">
+            <option value="vp8">VP8 (WebM互換・レガシー)</option>
           </optgroup>
         </select>
       </div>
       
       <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
         {#if videoCodec.startsWith('avc1.64')}
-          High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能
+          H.264 High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能。
         {:else if videoCodec.startsWith('avc1.4d')}
-          Main: バランスの良いH.264プロファイル。互換性が最も高い
-        {:else if videoCodec === 'avc1.42001f'}
-          Baseline L3.1: 標準画質のH.264。旧デバイスとの互換性重視
-        {:else if videoCodec === 'avc1.42001e'}
-          Baseline L3.0: 低解像度向けH.264。最高の互換性
+          H.264 Main: バランスの良いH.264プロファイル。互換性が最も高い。
+        {:else if videoCodec.startsWith('avc1.42')}
+          H.264 Baseline: 旧デバイス・組み込み機器向け。最高の互換性。
         {:else if videoCodec.startsWith('hev1')}
-          H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要
+          H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要。
         {:else if videoCodec.startsWith('hvc1')}
-          H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上
-        {:else if videoCodec.startsWith('vp09')}
-          VP9: Googleが開発した高効率コーデック。WebMコンテナで使用
+          H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上。
+        {:else if videoCodec.startsWith('vp09.00')}
+          VP9 Profile 0: Googleが開発した高効率コーデック。8bit。
+        {:else if videoCodec.startsWith('vp09.02')}
+          VP9 Profile 2: 10bit対応。HDR・高品質映像向け。
+        {:else if videoCodec.startsWith('vp8')}
+          VP8: VP9の前身。WebM互換・レガシーサポート。※ QPモード非対応（VBR/CBRのみ）。
         {:else if videoCodec.startsWith('av01')}
-          AV1: 最新の高効率コーデック。H.264の約30%のサイズで同等画質
+          AV1: 最新の高効率コーデック。VP9より約30%高効率。エンコード時間長い。
         {/if}
       </p>
       
       <div class="row">
-        <label>ビットレート品質:</label>
-        <select bind:value={qualityLevel}>
-          <option value="最高">最高 (元ファイルと同等)</option>
-          <option value="高">高 (元の80%)</option>
-          <option value="中">中 (元の60%) - 推奨</option>
-          <option value="低">低 (元の40%)</option>
-          <option value="最低">最低 (元の25%)</option>
-          <option value="カスタム">カスタム</option>
+        <label>品質モード:</label>
+        <select bind:value={bitrateMode}>
+          <option value="quantizer">QP (量子化パラメータ) - 推奨</option>
+          <option value="variable">VBR (可変ビットレート)</option>
+          <option value="constant">CBR (固定ビットレート)</option>
         </select>
       </div>
-
-      {#if qualityLevel !== 'カスタム'}
+      
+      <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+        {#if bitrateMode === 'quantizer'}
+          QP: 一定の品質を保つモード。推奨設定。
+        {:else if bitrateMode === 'variable'}
+          VBR: ビットレートを可変にして効率的にエンコード。
+        {:else if bitrateMode === 'constant'}
+          CBR: 固定ビットレートで一定のファイルサイズを保証。
+        {/if}
+        {#if videoCodec === 'vp8'}
+          <br/><span style="color: #ff9800;">⚠️ VP8はQPモードに対応していません。VBR/CBRのみ使用可能です。</span>
+        {/if}
+      </p>
+      
+      {#if bitrateMode === 'quantizer'}
+        <div class="row">
+          <label>QP品質:</label>
+          <select bind:value={qpPreset}>
+            <option value="最高">最高 (QP=18)</option>
+            <option value="高">高 (QP=23)</option>
+            <option value="中">中 (QP=28) - 推奨</option>
+            <option value="低">低 (QP=33)</option>
+            <option value="最低">最低 (QP=38)</option>
+            <option value="カスタム">カスタム</option>
+          </select>
+        </div>
+        
+        {#if qpPreset === 'カスタム'}
+          <div class="row">
+            <label>QP値:</label>
+            <input 
+              type="number" 
+              bind:value={qpValue} 
+              min="0" 
+              max={videoCodec.startsWith('vp09') || videoCodec.startsWith('av01') ? 63 : 51} 
+              step="1" 
+            />
+          </div>
+          <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+            低い値 = 高品質・大容量, 高い値 = 低品質・小容量
+            {#if videoCodec.startsWith('vp09') || videoCodec.startsWith('av01')}
+              <br/>VP9/AV1: 0-63の範囲で指定可能
+            {:else}
+              <br/>H.264/H.265: 0-51の範囲で指定可能
+            {/if}
+          </p>
+        {/if}
+        
         <div class="row">
           <label>音声品質:</label>
           <select bind:value={audioQualityLevel}>
@@ -1219,27 +1378,60 @@
             <option value="中">中 (128Kbps) - 推奨</option>
             <option value="低">低 (96Kbps)</option>
             <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
+            <option value="カスタム">カスタム</option>
           </select>
         </div>
-      {/if}
-
-      {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
-        <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
-          推定ビットレート: 映像 {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps / 音声 {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
-          {#if videoCodec.startsWith('vp09')}
-            (VP9コーデックにより最適化)
-          {:else if videoCodec.startsWith('av01')}
-            (AV1コーデックにより最適化)
-          {/if}
-          {#if audioCodec.startsWith('mp4a')}
-            <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
-          {/if}
-        </p>
-      {/if}
-
-      {#if qualityLevel === 'カスタム'}
+        
+        {#if audioQualityLevel === 'カスタム'}
+          <div class="row">
+            <label>音声ビットレート (Kbps):</label>
+            <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
+          </div>
+        {/if}
+      {:else}
         <div class="row">
-          <label>映像ビットレート (Kbps):</label>
+          <label>ビットレート品質:</label>
+          <select bind:value={qualityLevel}>
+            <option value="最高">最高 (元ファイルと同等)</option>
+            <option value="高">高 (元の80%)</option>
+            <option value="中">中 (元の60%) - 推奨</option>
+            <option value="低">低 (元の40%)</option>
+            <option value="最低">最低 (元の25%)</option>
+            <option value="カスタム">カスタム</option>
+          </select>
+        </div>
+
+        {#if qualityLevel !== 'カスタム'}
+          <div class="row">
+            <label>音声品質:</label>
+            <select bind:value={audioQualityLevel}>
+              <option value="最高">最高 (192Kbps)</option>
+              <option value="高">高 (160Kbps)</option>
+              <option value="中">中 (128Kbps) - 推奨</option>
+              <option value="低">低 (96Kbps)</option>
+              <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
+            </select>
+          </div>
+        {/if}
+
+        {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
+          <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
+            推定ビットレート: 映像 {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps / 音声 {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
+            {#if videoCodec.startsWith('vp09')}
+              (VP9コーデックにより最適化)
+            {:else if videoCodec.startsWith('av01')}
+              (AV1コーデックにより最適化)
+            {/if}
+            {#if audioCodec.startsWith('mp4a')}
+              <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
+            {/if}
+            <br/>※ ビットレートモードのみ推定可能（QPモードでは推定不可）
+          </p>
+        {/if}
+
+        {#if qualityLevel === 'カスタム'}
+          <div class="row">
+            <label>映像ビットレート (Kbps):</label>
           <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
         </div>
 
@@ -1247,6 +1439,7 @@
           <label>音声ビットレート (Kbps):</label>
           <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
         </div>
+        {/if}
       {/if}
       
       <div class="row">
@@ -1278,11 +1471,23 @@
         <div class="row">
           <label>音声コーデック:</label>
           <select bind:value={audioCodec}>
-            <option value="mp4a.40.2">AAC-LC</option>
-            <option value="mp4a.40.5">AAC-HE</option>
-            <option value="opus">Opus</option>
+            <optgroup label="AAC (MP4)">
+              <option value="mp4a.40.2">AAC-LC (標準・推奨)</option>
+              <option value="mp4a.40.5">AAC-HE (高効率・低ビットレート)</option>
+              <option value="mp4a.40.29">AAC-HE v2 (超高効率)</option>
+            </optgroup>
+            <optgroup label="Opus (WebM)">
+              <option value="opus">Opus (高品質・低遅延)</option>
+            </optgroup>
           </select>
         </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {audioCodecDescription}
+          {#if bitrateMode === 'quantizer'}
+            <br/>※ 音声エンコーダーはQP（量子化パラメータ）をサポートしていません。ビットレート指定のみ可能です。
+          {/if}
+        </p>
         
         <div class="row">
           <label>コンテナ形式:</label>
@@ -1374,6 +1579,62 @@
             <p style="color: #f44336; font-size: 12px; margin-top: -8px;">⚠️ フレームレートを元ファイル({originalFramerate.toFixed(1)}fps)より高く設定しても品質は向上しません</p>
           {/if}
         {/if}
+        
+        <h3 class="section-title" style="margin-top: 20px;">高度なエンコード設定</h3>
+        
+        <div class="row">
+          <label>ハードウェアアクセラレーション:</label>
+          <select bind:value={hardwareAcceleration}>
+            <option value="no-preference">自動選択</option>
+            <option value="prefer-hardware">ハードウェア優先 (GPU使用)</option>
+            <option value="prefer-software">ソフトウェア優先 (CPU使用)</option>
+          </select>
+        </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {#if hardwareAcceleration === 'no-preference'}
+            ブラウザが自動的に最適な方法を選択します
+          {:else if hardwareAcceleration === 'prefer-hardware'}
+            GPUを使用して高速にエンコード (非対応の場合はCPUを使用)
+          {:else if hardwareAcceleration === 'prefer-software'}
+            CPUを使用してエンコード (互換性重視)
+          {/if}
+        </p>
+        
+        <div class="row">
+          <label>スケーラビリティモード:</label>
+          <select bind:value={scalabilityMode}>
+            <option value="">使用しない</option>
+            <option value="L1T2">L1T2 (2層時間スケーラビリティ)</option>
+            <option value="L1T3">L1T3 (3層時間スケーラビリティ)</option>
+          </select>
+        </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {#if scalabilityMode === ''}
+            標準的なエンコード (推奨)
+          {:else if scalabilityMode === 'L1T2'}
+            時間的スケーラビリティを有効化 (ストリーミング向け)
+          {:else if scalabilityMode === 'L1T3'}
+            3層時間的スケーラビリティ (高度なストリーミング向け)
+          {/if}
+        </p>
+        
+        <div class="row">
+          <label>アルファチャンネル:</label>
+          <select bind:value={alphaMode}>
+            <option value="discard">破棄 (透明度なし)</option>
+            <option value="keep">保持 (透明度あり)</option>
+          </select>
+        </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {#if alphaMode === 'discard'}
+            アルファチャンネルを破棄 (通常の動画)
+          {:else}
+            アルファチャンネルを保持 (透明度付き動画)
+          {/if}
+        </p>
       </div>
     {/if}
 
