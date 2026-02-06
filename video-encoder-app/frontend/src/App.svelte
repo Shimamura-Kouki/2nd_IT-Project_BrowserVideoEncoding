@@ -71,7 +71,7 @@
   let qpPreset = '中'; // 最高, 高, 中, 低, 最低, カスタム
   
   // Reactive current QP value for display
-  $: currentQP = calculateQP();
+  $: currentQP = (qpPreset, qpValue, calculateQP());
   
   // Advanced WebCodecs configuration options
   let hardwareAcceleration = 'no-preference'; // 'no-preference', 'prefer-hardware', 'prefer-software'
