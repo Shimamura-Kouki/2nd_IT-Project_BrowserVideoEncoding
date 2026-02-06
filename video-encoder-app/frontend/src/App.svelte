@@ -60,10 +60,15 @@
   let framerate = 30;
   
   // Bitrate settings - quality-based
-  let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム
+  let bitrateMode = 'quantizer'; // 'constant', 'variable', 'quantizer' (QP mode is default)
+  let qualityLevel = '中'; // 最高, 高, 中, 低, 最低, カスタム (for bitrate mode)
   let audioQualityLevel = '中'; // 最高, 高, 中, 低, 最低
-  let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム'
+  let customVideoBitrate = 5000; // in Kbps, used when qualityLevel is 'カスタム' in bitrate mode
   let customAudioBitrate = 128; // in Kbps, used when qualityLevel is 'カスタム'
+  
+  // QP (Quantization Parameter) settings for quantizer mode
+  let qpValue = 28; // Default QP value (lower = higher quality, typical range: 0-51 for H.264/H.265)
+  let qpPreset = '中'; // 最高, 高, 中, 低, 最低, カスタム
 
   // Auto-change container based on video codec selection only (to avoid cycles)
   $: {
@@ -266,6 +271,26 @@
     }
   };
 
+  // Calculate QP value based on preset
+  function calculateQP(): number {
+    if (qpPreset === 'カスタム') {
+      return qpValue;
+    }
+    
+    // QP presets for H.264/H.265/VP9/AV1
+    // Lower QP = Higher Quality (typical range: 0-51 for H.264/H.265, 0-63 for VP9/AV1)
+    // For H.264/H.265: recommended range 18-28 for good quality
+    // For VP9/AV1: similar but can go higher
+    switch (qpPreset) {
+      case '最高': return 18; // Excellent quality
+      case '高': return 23;   // High quality
+      case '中': return 28;   // Medium quality (balanced)
+      case '低': return 33;   // Low quality
+      case '最低': return 38; // Minimum quality
+      default: return 28;
+    }
+  }
+
   // Calculate bitrate based on quality level and codec
   function calculateBitrate(isVideo: boolean): number {
     const baseRate = isVideo ? originalVideoBitrate : originalAudioBitrate;
@@ -445,12 +470,37 @@
       videoCodec = preset.codec ?? 'avc1.640028';
       audioCodec = preset.audioCodec ?? 'mp4a.40.2';
       
-      // Set quality level based on preset bitrate
-      if (preset.preserveOriginal) {
-        qualityLevel = '高'; // Default quality for preserve presets
+      // Apply bitrate mode and quality settings
+      bitrateMode = preset.bitrateMode ?? 'quantizer';
+      
+      if (bitrateMode === 'quantizer') {
+        // QP mode - set QP preset based on quantizer value
+        if (preset.quantizer !== undefined) {
+          if (preset.quantizer <= 18) {
+            qpPreset = '最高';
+          } else if (preset.quantizer <= 23) {
+            qpPreset = '高';
+          } else if (preset.quantizer <= 28) {
+            qpPreset = '中';
+          } else if (preset.quantizer <= 33) {
+            qpPreset = '低';
+          } else {
+            qpPreset = '最低';
+          }
+          qpValue = preset.quantizer;
+        } else {
+          qpPreset = '中';
+          qpValue = 28;
+        }
       } else {
-        qualityLevel = '中'; // Default quality for standard presets
+        // Bitrate mode - set quality level
+        if (preset.preserveOriginal) {
+          qualityLevel = '高'; // Default quality for preserve presets
+        } else {
+          qualityLevel = '中'; // Default quality for standard presets
+        }
       }
+      
       customVideoBitrate = (preset.bitrate ?? 5_000_000) / 1000;
       customAudioBitrate = (preset.audio_bitrate ?? 128_000) / 1000;
       framerate = preset.framerate ?? 30;
@@ -556,6 +606,9 @@
     heightOnly = 1080;
     framerateMode = 'manual';
     framerate = 30;
+    bitrateMode = 'quantizer';
+    qpPreset = '中';
+    qpValue = 28;
     qualityLevel = '中';
     audioQualityLevel = '中';
     customVideoBitrate = 5000;
@@ -608,6 +661,7 @@
 
       const videoBitrate = calculateBitrate(true);
       const audioBitrate = calculateBitrate(false);
+      const videoQP = calculateQP();
 
       const config = {
         video: { 
@@ -616,6 +670,8 @@
           width: width, 
           height: height, 
           bitrate: videoBitrate, 
+          bitrateMode: bitrateMode,
+          quantizer: videoQP,
           framerate: framerate,
           framerateMode: framerateMode
         },
@@ -1199,18 +1255,47 @@
       </p>
       
       <div class="row">
-        <label>ビットレート品質:</label>
-        <select bind:value={qualityLevel}>
-          <option value="最高">最高 (元ファイルと同等)</option>
-          <option value="高">高 (元の80%)</option>
-          <option value="中">中 (元の60%) - 推奨</option>
-          <option value="低">低 (元の40%)</option>
-          <option value="最低">最低 (元の25%)</option>
-          <option value="カスタム">カスタム</option>
+        <label>品質モード:</label>
+        <select bind:value={bitrateMode}>
+          <option value="quantizer">QP (量子化パラメータ) - 推奨</option>
+          <option value="variable">VBR (可変ビットレート)</option>
+          <option value="constant">CBR (固定ビットレート)</option>
         </select>
       </div>
-
-      {#if qualityLevel !== 'カスタム'}
+      
+      <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+        {#if bitrateMode === 'quantizer'}
+          QP: 一定の品質を保つモード。推奨設定
+        {:else if bitrateMode === 'variable'}
+          VBR: ビットレートを可変にして効率的にエンコード
+        {:else if bitrateMode === 'constant'}
+          CBR: 固定ビットレートで一定のファイルサイズを保証
+        {/if}
+      </p>
+      
+      {#if bitrateMode === 'quantizer'}
+        <div class="row">
+          <label>QP品質:</label>
+          <select bind:value={qpPreset}>
+            <option value="最高">最高 (QP=18)</option>
+            <option value="高">高 (QP=23)</option>
+            <option value="中">中 (QP=28) - 推奨</option>
+            <option value="低">低 (QP=33)</option>
+            <option value="最低">最低 (QP=38)</option>
+            <option value="カスタム">カスタム</option>
+          </select>
+        </div>
+        
+        {#if qpPreset === 'カスタム'}
+          <div class="row">
+            <label>QP値 (0-51):</label>
+            <input type="number" bind:value={qpValue} min="0" max="51" step="1" />
+          </div>
+          <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+            低い値 = 高品質・大容量, 高い値 = 低品質・小容量
+          </p>
+        {/if}
+        
         <div class="row">
           <label>音声品質:</label>
           <select bind:value={audioQualityLevel}>
@@ -1221,25 +1306,49 @@
             <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
           </select>
         </div>
-      {/if}
-
-      {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
-        <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
-          推定ビットレート: 映像 {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps / 音声 {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
-          {#if videoCodec.startsWith('vp09')}
-            (VP9コーデックにより最適化)
-          {:else if videoCodec.startsWith('av01')}
-            (AV1コーデックにより最適化)
-          {/if}
-          {#if audioCodec.startsWith('mp4a')}
-            <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
-          {/if}
-        </p>
-      {/if}
-
-      {#if qualityLevel === 'カスタム'}
+      {:else}
         <div class="row">
-          <label>映像ビットレート (Kbps):</label>
+          <label>ビットレート品質:</label>
+          <select bind:value={qualityLevel}>
+            <option value="最高">最高 (元ファイルと同等)</option>
+            <option value="高">高 (元の80%)</option>
+            <option value="中">中 (元の60%) - 推奨</option>
+            <option value="低">低 (元の40%)</option>
+            <option value="最低">最低 (元の25%)</option>
+            <option value="カスタム">カスタム</option>
+          </select>
+        </div>
+
+        {#if qualityLevel !== 'カスタム'}
+          <div class="row">
+            <label>音声品質:</label>
+            <select bind:value={audioQualityLevel}>
+              <option value="最高">最高 (192Kbps)</option>
+              <option value="高">高 (160Kbps)</option>
+              <option value="中">中 (128Kbps) - 推奨</option>
+              <option value="低">低 (96Kbps)</option>
+              <option value="最低">最低 ({audioCodec === 'opus' ? '64' : '96'}Kbps)</option>
+            </select>
+          </div>
+        {/if}
+
+        {#if sourceFileAnalyzed && qualityLevel !== 'カスタム'}
+          <p style="color: #666; font-size: 12px; margin-left: 112px; margin-top: -8px;">
+            推定ビットレート: 映像 {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps / 音声 {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps
+            {#if videoCodec.startsWith('vp09')}
+              (VP9コーデックにより最適化)
+            {:else if videoCodec.startsWith('av01')}
+              (AV1コーデックにより最適化)
+            {/if}
+            {#if audioCodec.startsWith('mp4a')}
+              <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
+            {/if}
+          </p>
+        {/if}
+
+        {#if qualityLevel === 'カスタム'}
+          <div class="row">
+            <label>映像ビットレート (Kbps):</label>
           <input type="number" bind:value={customVideoBitrate} min="100" max="50000" step="100" />
         </div>
 
@@ -1247,6 +1356,7 @@
           <label>音声ビットレート (Kbps):</label>
           <input type="number" bind:value={customAudioBitrate} min="32" max="320" step="8" />
         </div>
+        {/if}
       {/if}
       
       <div class="row">
