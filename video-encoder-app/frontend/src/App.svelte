@@ -77,7 +77,7 @@
 
   // Auto-change container based on video codec selection only (to avoid cycles)
   $: {
-    if (videoCodec.startsWith('vp09') || videoCodec.startsWith('vp08') || videoCodec.startsWith('av01')) {
+    if (videoCodec.startsWith('vp09') || videoCodec.startsWith('vp08') || videoCodec.startsWith('vp8') || videoCodec.startsWith('av01')) {
       containerFormat = 'webm';
     } else if (videoCodec.startsWith('avc1') || videoCodec.startsWith('hev1') || videoCodec.startsWith('hvc1')) {
       containerFormat = 'mp4';
@@ -88,13 +88,13 @@
   $: {
     // Only auto-switch for MP4 containers to avoid opus conflicts
     if (containerFormat === 'mp4' && !audioCodec.startsWith('mp4a')) {
-      // If somehow we have opus in MP4, switch to AAC-LC
+      // If somehow we have opus/flac/pcm in MP4, switch to AAC-LC
       audioCodec = 'mp4a.40.2';
     }
     
-    // Always use AAC-LC for MP4 containers
+    // Always use AAC-LC for MP4 containers (not HE-AAC or HE-AAC v2)
     if (containerFormat === 'mp4') {
-      if (audioCodec.startsWith('mp4a.40.5')) {
+      if (audioCodec.startsWith('mp4a.40.5') || audioCodec.startsWith('mp4a.40.29')) {
         audioCodec = 'mp4a.40.2';
       }
     } else if (containerFormat === 'webm' && audioCodec.startsWith('mp4a')) {
@@ -1194,17 +1194,28 @@
               videoCodec.startsWith('hev1') ? 'H.265 (hev1)' :
               videoCodec.startsWith('hvc1') ? 'H.265 (hvc1)' :
               videoCodec.startsWith('vp09') ? 'VP9' :
+              videoCodec.startsWith('vp8') ? 'VP8' :
               videoCodec.startsWith('av01') ? 'AV1' :
               videoCodec
             }</p>
             <p style="margin: 4px 0;"><strong>出力音声コーデック:</strong> {
               audioCodec === 'mp4a.40.2' ? 'AAC-LC' :
               audioCodec === 'mp4a.40.5' ? 'AAC-HE' :
+              audioCodec === 'mp4a.40.29' ? 'AAC-HE v2' :
               audioCodec === 'opus' ? 'Opus' :
+              audioCodec === 'flac' ? 'FLAC' :
+              audioCodec === 'pcm' ? 'PCM' :
               audioCodec
             }</p>
-            <p style="margin: 4px 0;"><strong>出力映像ビットレート:</strong> {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps</p>
+            {#if bitrateMode === 'quantizer'}
+              <p style="margin: 4px 0;"><strong>出力映像品質:</strong> QP={calculateQP()} (低いほど高品質)</p>
+            {:else}
+              <p style="margin: 4px 0;"><strong>出力映像ビットレート:</strong> {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps</p>
+            {/if}
             <p style="margin: 4px 0;"><strong>出力音声ビットレート:</strong> {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps</p>
+            {#if bitrateMode === 'quantizer'}
+              <p style="color: #888; font-size: 11px; margin: 4px 0;">※ QPモードでは映像ビットレートは推定できません</p>
+            {/if}
           </div>
         {/if}
       </div>
@@ -1225,43 +1236,59 @@
         <label>コーデック:</label>
         <select bind:value={videoCodec} style="flex: 1;">
           <optgroup label="H.264 (AVC)">
-            <option value="avc1.640028">H.264 High (最高画質・互換性良)</option>
-            <option value="avc1.4d001f">H.264 Main (高画質・互換性最良)</option>
-            <option value="avc1.42001f">H.264 Baseline L3.1 (標準画質・旧デバイス対応)</option>
-            <option value="avc1.42001e">H.264 Baseline L3.0 (低解像度・最高互換性)</option>
+            <option value="avc1.640028">H.264 High L4.0 (最高画質・互換性良)</option>
+            <option value="avc1.64001f">H.264 High L3.1 (高画質・標準)</option>
+            <option value="avc1.64001e">H.264 High L3.0 (高画質・低解像度)</option>
+            <option value="avc1.4d0028">H.264 Main L4.0 (高画質・互換性最良)</option>
+            <option value="avc1.4d001f">H.264 Main L3.1 (標準・高互換性)</option>
+            <option value="avc1.4d001e">H.264 Main L3.0 (低解像度・最高互換性)</option>
+            <option value="avc1.42001f">H.264 Baseline L3.1 (旧デバイス対応)</option>
+            <option value="avc1.42001e">H.264 Baseline L3.0 (最高互換性)</option>
           </optgroup>
           <optgroup label="H.265 (HEVC)">
-            <option value="hev1.1.6.L93.B0">H.265 Main (高効率・新デバイス)</option>
-            <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 (Apple互換性向上)</option>
+            <option value="hev1.1.6.L93.B0">H.265 Main L3.1 (高効率・新デバイス)</option>
+            <option value="hev1.1.6.L90.B0">H.265 Main L3.0 (高効率・標準)</option>
+            <option value="hvc1.1.6.L93.B0">H.265 Main hvc1 L3.1 (Apple互換性向上)</option>
+            <option value="hvc1.1.6.L90.B0">H.265 Main hvc1 L3.0 (Apple互換性)</option>
+            <option value="hev1.1.6.L120.B0">H.265 Main L4.0 (高解像度・4K)</option>
           </optgroup>
           <optgroup label="VP9">
-            <option value="vp09.00.31.08">VP9 Profile 0 (WebM標準)</option>
-            <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (高解像度対応)</option>
+            <option value="vp09.00.41.08">VP9 Profile 0 L4.1 (4K対応・推奨)</option>
+            <option value="vp09.00.31.08">VP9 Profile 0 L3.1 (FHD対応)</option>
+            <option value="vp09.00.21.08">VP9 Profile 0 L2.1 (HD対応)</option>
+            <option value="vp09.02.10.10">VP9 Profile 2 10bit (高品質・HDR)</option>
           </optgroup>
           <optgroup label="AV1">
             <option value="av01.0.05M.08">AV1 Main L3.1 (最新・高効率)</option>
             <option value="av01.0.04M.08">AV1 Main L3.0 (標準解像度)</option>
+            <option value="av01.0.08M.08">AV1 Main L4.0 (4K対応)</option>
+            <option value="av01.0.09M.08">AV1 Main L4.1 (4K・高フレームレート)</option>
+          </optgroup>
+          <optgroup label="VP8">
+            <option value="vp8">VP8 (WebM互換・レガシー)</option>
           </optgroup>
         </select>
       </div>
       
       <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
         {#if videoCodec.startsWith('avc1.64')}
-          High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能
+          H.264 High: 最高画質のH.264プロファイル。ほとんどのデバイスで再生可能。
         {:else if videoCodec.startsWith('avc1.4d')}
-          Main: バランスの良いH.264プロファイル。互換性が最も高い
-        {:else if videoCodec === 'avc1.42001f'}
-          Baseline L3.1: 標準画質のH.264。旧デバイスとの互換性重視
-        {:else if videoCodec === 'avc1.42001e'}
-          Baseline L3.0: 低解像度向けH.264。最高の互換性
+          H.264 Main: バランスの良いH.264プロファイル。互換性が最も高い。
+        {:else if videoCodec.startsWith('avc1.42')}
+          H.264 Baseline: 旧デバイス・組み込み機器向け。最高の互換性。
         {:else if videoCodec.startsWith('hev1')}
-          H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要
+          H.265 (hev1): H.264より約50%高効率。比較的新しいデバイスが必要。
         {:else if videoCodec.startsWith('hvc1')}
-          H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上
-        {:else if videoCodec.startsWith('vp09')}
-          VP9: Googleが開発した高効率コーデック。WebMコンテナで使用
+          H.265 (hvc1): hev1と同等だがAppleデバイスでの互換性が向上。
+        {:else if videoCodec.startsWith('vp09.00')}
+          VP9 Profile 0: Googleが開発した高効率コーデック。8bit。
+        {:else if videoCodec.startsWith('vp09.02')}
+          VP9 Profile 2: 10bit対応。HDR・高品質映像向け。
+        {:else if videoCodec.startsWith('vp8')}
+          VP8: VP9の前身。WebM互換・レガシーサポート。
         {:else if videoCodec.startsWith('av01')}
-          AV1: 最新の高効率コーデック。H.264の約30%のサイズで同等画質
+          AV1: 最新の高効率コーデック。VP9より約30%高効率。エンコード時間長い。
         {/if}
       </p>
       
@@ -1365,6 +1392,7 @@
             {#if audioCodec.startsWith('mp4a')}
               <br/>※ AACコーデックは96/128/160/192Kbpsの4段階のみ対応
             {/if}
+            <br/>※ ビットレートモードのみ推定可能（QPモードでは推定不可）
           </p>
         {/if}
 
@@ -1410,11 +1438,37 @@
         <div class="row">
           <label>音声コーデック:</label>
           <select bind:value={audioCodec}>
-            <option value="mp4a.40.2">AAC-LC</option>
-            <option value="mp4a.40.5">AAC-HE</option>
-            <option value="opus">Opus</option>
+            <optgroup label="AAC (MP4)">
+              <option value="mp4a.40.2">AAC-LC (標準・推奨)</option>
+              <option value="mp4a.40.5">AAC-HE (高効率・低ビットレート)</option>
+              <option value="mp4a.40.29">AAC-HE v2 (超高効率)</option>
+            </optgroup>
+            <optgroup label="Opus (WebM)">
+              <option value="opus">Opus (高品質・低遅延)</option>
+            </optgroup>
+            <optgroup label="その他">
+              <option value="flac">FLAC (ロスレス圧縮)</option>
+              <option value="pcm">PCM (無圧縮)</option>
+            </optgroup>
           </select>
         </div>
+        
+        <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
+          {#if audioCodec.startsWith('mp4a.40.2')}
+            AAC-LC: 最も互換性の高い音声コーデック。推奨。
+          {:else if audioCodec.startsWith('mp4a.40.5')}
+            AAC-HE: 低ビットレートで高品質。音楽向け。
+          {:else if audioCodec.startsWith('mp4a.40.29')}
+            AAC-HE v2: 超低ビットレート用。音声コンテンツ向け。
+          {:else if audioCodec === 'opus'}
+            Opus: WebM用の高品質コーデック。低遅延。
+          {:else if audioCodec === 'flac'}
+            FLAC: ロスレス圧縮。音質劣化なし。ファイルサイズ大。
+          {:else if audioCodec === 'pcm'}
+            PCM: 無圧縮。最高音質。ファイルサイズ最大。
+          {/if}
+          <br/>※ 音声エンコーダーはQP（量子化パラメータ）をサポートしていません。ビットレート指定のみ可能です。
+        </p>
         
         <div class="row">
           <label>コンテナ形式:</label>
