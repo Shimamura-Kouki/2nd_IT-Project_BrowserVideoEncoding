@@ -86,9 +86,9 @@
 
   // Auto-switch audio codec based on container format
   $: {
-    // Only auto-switch for MP4 containers to avoid opus conflicts
+    // Only auto-switch for MP4 containers to avoid codec conflicts
     if (containerFormat === 'mp4' && !audioCodec.startsWith('mp4a')) {
-      // If somehow we have opus/flac/pcm in MP4, switch to AAC-LC
+      // If we have opus/flac/pcm in MP4, switch to AAC-LC (MP4 doesn't support these)
       audioCodec = 'mp4a.40.2';
     }
     
@@ -1213,6 +1213,7 @@
               <p style="margin: 4px 0;"><strong>出力映像ビットレート:</strong> {(estimatedVideoBitrate / 1000000).toFixed(1)}Mbps</p>
             {/if}
             <p style="margin: 4px 0;"><strong>出力音声ビットレート:</strong> {(estimatedAudioBitrate / 1000).toFixed(0)}Kbps</p>
+            <p style="color: #888; font-size: 11px; margin: 4px 0;">※ 音声エンコーダーはQPモードをサポートしていません（ビットレート指定のみ）</p>
             {#if bitrateMode === 'quantizer'}
               <p style="color: #888; font-size: 11px; margin: 4px 0;">※ QPモードでは映像ビットレートは推定できません</p>
             {/if}
