@@ -88,7 +88,7 @@
   $: {
     // Only auto-switch for MP4 containers to avoid codec conflicts
     if (containerFormat === 'mp4' && !audioCodec.startsWith('mp4a')) {
-      // If we have opus/flac/pcm in MP4, switch to AAC-LC (MP4 doesn't support these)
+      // If we have opus in MP4, switch to AAC-LC (MP4 doesn't support opus)
       audioCodec = 'mp4a.40.2';
     }
     
@@ -100,6 +100,14 @@
     } else if (containerFormat === 'webm' && audioCodec.startsWith('mp4a')) {
       // If we switched to WebM but still have AAC, switch to Opus
       audioCodec = 'opus';
+    }
+  }
+  
+  // Auto-switch bitrate mode for VP8 (VP8 doesn't support quantizer mode)
+  $: {
+    if (videoCodec === 'vp8' && bitrateMode === 'quantizer') {
+      bitrateMode = 'variable';
+      console.log('VP8 does not support quantizer mode, switching to variable bitrate mode');
     }
   }
 
@@ -1203,8 +1211,6 @@
               audioCodec === 'mp4a.40.5' ? 'AAC-HE' :
               audioCodec === 'mp4a.40.29' ? 'AAC-HE v2' :
               audioCodec === 'opus' ? 'Opus' :
-              audioCodec === 'flac' ? 'FLAC' :
-              audioCodec === 'pcm' ? 'PCM' :
               audioCodec
             }</p>
             {#if bitrateMode === 'quantizer'}
@@ -1287,7 +1293,7 @@
         {:else if videoCodec.startsWith('vp09.02')}
           VP9 Profile 2: 10bit対応。HDR・高品質映像向け。
         {:else if videoCodec.startsWith('vp8')}
-          VP8: VP9の前身。WebM互換・レガシーサポート。
+          VP8: VP9の前身。WebM互換・レガシーサポート。※ QPモード非対応（VBR/CBRのみ）。
         {:else if videoCodec.startsWith('av01')}
           AV1: 最新の高効率コーデック。VP9より約30%高効率。エンコード時間長い。
         {/if}
@@ -1309,6 +1315,9 @@
           VBR: ビットレートを可変にして効率的にエンコード。
         {:else if bitrateMode === 'constant'}
           CBR: 固定ビットレートで一定のファイルサイズを保証。
+        {/if}
+        {#if videoCodec === 'vp8'}
+          <br/><span style="color: #ff9800;">⚠️ VP8はQPモードに対応していません。VBR/CBRのみ使用可能です。</span>
         {/if}
       </p>
       
@@ -1447,10 +1456,6 @@
             <optgroup label="Opus (WebM)">
               <option value="opus">Opus (高品質・低遅延)</option>
             </optgroup>
-            <optgroup label="その他">
-              <option value="flac">FLAC (ロスレス圧縮)</option>
-              <option value="pcm">PCM (無圧縮)</option>
-            </optgroup>
           </select>
         </div>
         
@@ -1463,10 +1468,6 @@
             AAC-HE v2: 超低ビットレート用。音声コンテンツ向け。
           {:else if audioCodec === 'opus'}
             Opus: WebM用の高品質コーデック。低遅延。
-          {:else if audioCodec === 'flac'}
-            FLAC: ロスレス圧縮。音質劣化なし。ファイルサイズ大。
-          {:else if audioCodec === 'pcm'}
-            PCM: 無圧縮。最高音質。ファイルサイズ最大。
           {/if}
           <br/>※ 音声エンコーダーはQP（量子化パラメータ）をサポートしていません。ビットレート指定のみ可能です。
         </p>
