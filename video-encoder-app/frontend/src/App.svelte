@@ -683,7 +683,7 @@
           framerate: framerate,
           framerateMode: framerateMode,
           hardwareAcceleration: hardwareAcceleration,
-          scalabilityMode: scalabilityMode || undefined,
+          scalabilityMode: scalabilityMode,
           alpha: alphaMode
         },
         audio: { 
@@ -1276,11 +1276,11 @@
       
       <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
         {#if bitrateMode === 'quantizer'}
-          QP: 一定の品質を保つモード。推奨設定
+          QP: 一定の品質を保つモード。推奨設定。
         {:else if bitrateMode === 'variable'}
-          VBR: ビットレートを可変にして効率的にエンコード
+          VBR: ビットレートを可変にして効率的にエンコード。
         {:else if bitrateMode === 'constant'}
-          CBR: 固定ビットレートで一定のファイルサイズを保証
+          CBR: 固定ビットレートで一定のファイルサイズを保証。
         {/if}
       </p>
       
@@ -1299,11 +1299,22 @@
         
         {#if qpPreset === 'カスタム'}
           <div class="row">
-            <label>QP値 (0-51):</label>
-            <input type="number" bind:value={qpValue} min="0" max="51" step="1" />
+            <label>QP値:</label>
+            <input 
+              type="number" 
+              bind:value={qpValue} 
+              min="0" 
+              max={videoCodec.startsWith('vp09') || videoCodec.startsWith('av01') ? 63 : 51} 
+              step="1" 
+            />
           </div>
           <p style="color: #666; font-size: 11px; margin-left: 112px; margin-top: -8px;">
             低い値 = 高品質・大容量, 高い値 = 低品質・小容量
+            {#if videoCodec.startsWith('vp09') || videoCodec.startsWith('av01')}
+              <br/>VP9/AV1: 0-63の範囲で指定可能
+            {:else}
+              <br/>H.264/H.265: 0-51の範囲で指定可能
+            {/if}
           </p>
         {/if}
         

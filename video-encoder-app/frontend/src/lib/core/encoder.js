@@ -427,11 +427,12 @@ export async function encodeToFile(file, config, onProgress, signal) {
             codec: config.video.codec ?? 'avc1.640028',
             width: outputWidth,
             height: outputHeight,
-            bitrate: config.video.bitrate,
+            // Include bitrate only when not in quantizer mode
+            ...(config.video.bitrateMode !== 'quantizer' ? { bitrate: config.video.bitrate } : {}),
             bitrateMode: config.video.bitrateMode ?? 'quantizer',
             framerate: outputFramerate,
             latencyMode: 'quality',
-            // Use quantizer if in quantizer mode, otherwise use bitrate
+            // Use quantizer if in quantizer mode
             ...(config.video.bitrateMode === 'quantizer' && config.video.quantizer !== undefined 
                 ? { quantizer: config.video.quantizer }
                 : {}),
