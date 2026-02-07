@@ -175,6 +175,16 @@
     }
   }
 
+  // Group presets by category for organized display
+  $: groupedPresets = presets.reduce((acc, preset, index) => {
+    const category = preset.category || '未分類';
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push({ ...preset, index });
+    return acc;
+  }, {} as Record<string, Array<any>>);
+
   // Resolution presets based on longest edge
   const resolutionPresets = {
     '3840': { longestEdge: 3840, label: '3840 (4K)' },
@@ -1248,8 +1258,12 @@
       <div class="row">
         <label>プリセット:</label>
         <select bind:value={selectedPresetIndex} on:change={applyPreset}>
-          {#each presets as p, i}
-            <option value={i}>{p.name}</option>
+          {#each Object.entries(groupedPresets) as [category, categoryPresets]}
+            <optgroup label={category}>
+              {#each categoryPresets as p}
+                <option value={p.index}>{p.name}</option>
+              {/each}
+            </optgroup>
           {/each}
         </select>
       </div>
