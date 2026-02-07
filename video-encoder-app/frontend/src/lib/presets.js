@@ -9,6 +9,9 @@ const DEFAULT_PRESETS = [
     { category: 'QP品質モード - H.264 (MP4)', name: '標準品質 480p30', config_json: { container: 'mp4', codec: 'avc1.42001e', audioCodec: 'mp4a.40.2', width: 854, height: 480, bitrateMode: 'quantizer', quantizer: 28, framerate: 30, audio_bitrate: 96_000 } },
     
     // === QP品質モード - VP9 (WebM) ===
+    // Note: VP9 is ~30% more efficient than H.264, so equivalent quality uses higher QP
+    // Standard quality uses QP=33 for VP9 vs QP=28 for H.264
+    // 480p uses higher QP=38 to reduce file size for lower resolution content
     { category: 'QP品質モード - VP9 (WebM)', name: '高品質 1080p60', config_json: { container: 'webm', codec: 'vp09.00.31.08', audioCodec: 'opus', width: 1920, height: 1080, bitrateMode: 'quantizer', quantizer: 28, framerate: 60, audio_bitrate: 192_000 } },
     { category: 'QP品質モード - VP9 (WebM)', name: '標準品質 1080p30', config_json: { container: 'webm', codec: 'vp09.00.31.08', audioCodec: 'opus', width: 1920, height: 1080, bitrateMode: 'quantizer', quantizer: 33, framerate: 30, audio_bitrate: 128_000 } },
     { category: 'QP品質モード - VP9 (WebM)', name: '高品質 720p60', config_json: { container: 'webm', codec: 'vp09.00.31.08', audioCodec: 'opus', width: 1280, height: 720, bitrateMode: 'quantizer', quantizer: 28, framerate: 60, audio_bitrate: 128_000 } },
@@ -16,6 +19,8 @@ const DEFAULT_PRESETS = [
     { category: 'QP品質モード - VP9 (WebM)', name: '標準品質 480p30', config_json: { container: 'webm', codec: 'vp09.00.31.08', audioCodec: 'opus', width: 854, height: 480, bitrateMode: 'quantizer', quantizer: 38, framerate: 30, audio_bitrate: 96_000 } },
     
     // === 元ファイル解像度を維持 ===
+    // Note: VP9 uses higher QP (33) than H.264 (28) because VP9 is ~30% more efficient
+    // QP=33 for VP9 produces similar quality to QP=28 for H.264
     { category: '元ファイル解像度を維持', name: 'H.264 (MP4)', config_json: { container: 'mp4', codec: 'avc1.640028', audioCodec: 'mp4a.40.2', preserveOriginal: true, bitrateMode: 'quantizer', quantizer: 28, framerate: 30, audio_bitrate: 128_000 } },
     { category: '元ファイル解像度を維持', name: 'VP9 (WebM)', config_json: { container: 'webm', codec: 'vp09.00.31.08', audioCodec: 'opus', preserveOriginal: true, bitrateMode: 'quantizer', quantizer: 33, framerate: 30, audio_bitrate: 128_000 } },
     

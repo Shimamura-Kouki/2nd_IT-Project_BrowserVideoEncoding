@@ -176,6 +176,9 @@
   }
 
   // Group presets by category for organized display
+  // Note: '未分類' (Uncategorized) is a fallback for presets without a category field
+  // All built-in presets have categories, but this ensures forward compatibility
+  // with custom user-created presets that might not include a category
   $: groupedPresets = presets.reduce((acc, preset, index) => {
     const category = preset.category || '未分類';
     if (!acc[category]) {
