@@ -7,6 +7,8 @@ WebCodecs APIを活用した、完全クライアントサイドで動作する�
 
 <https://shimamura-kouki.github.io/2nd_IT-Project_BrowserVideoEncoding/>
 
+> **⚠️ 重要な変更**: 2026年2月以降のビルドでは、内部パスが絶対パスから相対パスに変更されました。それ以前にビルドされたファイル（絶対パス `/2nd_IT-Project_BrowserVideoEncoding/` を使用）は、GitHub Pages以外の環境で正しく動作しない可能性があります。最新のビルドをご利用ください。
+
 ## 🌐 ブラウザ対応状況
 
 ### ✅ 推奨ブラウザ（動作確認済み）
