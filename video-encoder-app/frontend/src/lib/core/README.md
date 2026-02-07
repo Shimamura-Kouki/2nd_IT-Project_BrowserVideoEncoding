@@ -164,6 +164,18 @@ const config = {
 - VP9/AV1: 0-63 (recommended: 20-35)
 - VP8: QP mode NOT supported → auto-switch to VBR
 
+**Important Note about QP Mode Bitrate:**
+- In QP mode, the **output bitrate is determined by the encoder** based on:
+  - The QP value (lower QP = higher quality = higher bitrate)
+  - Content complexity (complex scenes use more bitrate)
+  - Resolution and framerate
+- The encoder does **NOT** accept a bitrate parameter in QP mode
+- Example: VP9 at 480p with QP=38 may produce ~1800Kbps output
+  - This is **expected behavior** and cannot be directly controlled
+  - To reduce bitrate: increase QP value (e.g., QP=40-45)
+  - To increase bitrate: decrease QP value (e.g., QP=30-35)
+- For precise bitrate control, use VBR or CBR mode instead of QP mode
+
 ### 2-Pass Encoding
 
 The encoder uses 2-pass encoding to accurately calculate progress:
