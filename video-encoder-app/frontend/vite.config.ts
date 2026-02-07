@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
 
     return {
         plugins: [svelte()],
-        base: '/2nd_IT-Project_BrowserVideoEncoding/',
+        base: './',
         server: {
             port: 5173,
             host: true,
