@@ -26,6 +26,7 @@
   let showErrorLogs = false;
   let showSeekWarning = false; // Warning for video seeking limitation
   // WebM support removed - format not supported
+  let isDragging = false; // Track drag state for visual feedback
 
   // Browser compatibility detection
   let isFirefox = false;
@@ -303,6 +304,131 @@
       } catch (error) {
         console.error('Failed to analyze file:', error);
         // Mark as analyzed to allow user to proceed even if initial setup fails
+        sourceFileAnalyzed = true;
+      }
+    }
+  };
+
+  // Drag and drop event handlers
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragEnter = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isDragging = true;
+  };
+
+  const handleDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set isDragging to false if we're leaving the dropzone itself
+    // (not just moving between child elements)
+    const target = e.currentTarget as HTMLElement;
+    const related = e.relatedTarget as HTMLElement;
+    if (!target.contains(related)) {
+      isDragging = false;
+    }
+  };
+
+  const handleDrop = async (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isDragging = false;
+    
+    const droppedFile = e.dataTransfer?.files?.[0];
+    if (!droppedFile) return;
+    
+    // Validate file type
+    const fileName = droppedFile.name.toLowerCase();
+    const fileType = droppedFile.type;
+    const isValidFile = 
+      fileName.endsWith('.mp4') || 
+      fileName.endsWith('.m4v') || 
+      fileName.endsWith('.mov') ||
+      fileType === 'video/mp4' ||
+      fileType === 'video/quicktime';
+    
+    if (!isValidFile) {
+      alert('対応していないファイル形式です。MP4またはMOV形式のファイルを選択してください。');
+      return;
+    }
+    
+    // Set the file and analyze it (same logic as pickFile)
+    file = droppedFile;
+    sourceFileAnalyzed = false;
+    showSeekWarning = false;
+    originalWidth = 0;
+    originalHeight = 0;
+    originalFramerate = 0;
+    originalVideoBitrate = 0;
+    originalAudioBitrate = 0;
+    
+    // Analyze file immediately when dropped
+    if (file) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const mp4boxfile = MP4Box.createFile();
+        let analysisErrorCount = 0;
+        
+        mp4boxfile.onReady = (info: any) => {
+          const videoTrack = info.videoTracks?.[0];
+          const audioTrack = info.audioTracks?.[0];
+          
+          // First, determine audio bitrate
+          if (audioTrack) {
+            // Calculate audio bitrate
+            if (audioTrack.bitrate) {
+              originalAudioBitrate = audioTrack.bitrate;
+            } else {
+              originalAudioBitrate = 128000; // default estimate
+            }
+          }
+          
+          if (videoTrack) {
+            originalWidth = videoTrack.video.width;
+            originalHeight = videoTrack.video.height;
+            originalFramerate = videoTrack.movie_duration && videoTrack.nb_samples 
+              ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
+              : 30;
+            
+            // Calculate video bitrate
+            if (videoTrack.bitrate) {
+              originalVideoBitrate = videoTrack.bitrate;
+            } else {
+              // Estimate from file size
+              const fileSizeBytes = file?.size || 0;
+              const durationSec = videoTrack.movie_duration / videoTrack.movie_timescale;
+              const estimatedTotalBitrate = (fileSizeBytes * 8) / durationSec;
+              originalVideoBitrate = estimatedTotalBitrate - originalAudioBitrate;
+            }
+            
+            sourceFileAnalyzed = true;
+          }
+        };
+        
+        mp4boxfile.onError = (e: any) => {
+          analysisErrorCount++;
+          console.warn(`MP4Box analysis warning (${analysisErrorCount}/${MAX_MP4BOX_PARSING_ERRORS}):`, e);
+          
+          if (analysisErrorCount >= MAX_MP4BOX_PARSING_ERRORS) {
+            console.warn('File analysis failed due to too many errors. Video metadata may be incomplete.');
+            sourceFileAnalyzed = true;
+          }
+        };
+        
+        arrayBuffer.fileStart = 0;
+        try {
+          mp4boxfile.appendBuffer(arrayBuffer);
+          mp4boxfile.flush();
+        } catch (error) {
+          console.error('Failed to parse MP4 file during analysis:', error);
+          sourceFileAnalyzed = true;
+        }
+      } catch (error) {
+        console.error('Failed to analyze file:', error);
         sourceFileAnalyzed = true;
       }
     }
@@ -886,6 +1012,13 @@
     background: var(--color-progressBg);
   }
 
+  .dropzone.dragging {
+    border-color: var(--color-primary);
+    background: var(--color-progressBg);
+    border-width: 3px;
+    transform: scale(1.02);
+  }
+
   .dropzone input {
     display: none;
   }
@@ -1192,7 +1325,15 @@
     </div>
   {/if}
 
-  <div class="dropzone" on:click={() => document.getElementById('fileInput')?.click()}>
+  <div 
+    class="dropzone" 
+    class:dragging={isDragging}
+    on:click={() => document.getElementById('fileInput')?.click()}
+    on:drop={handleDrop}
+    on:dragover={handleDragOver}
+    on:dragenter={handleDragEnter}
+    on:dragleave={handleDragLeave}
+  >
     <input type="file" id="fileInput" accept="video/mp4,video/quicktime" on:change={pickFile} />
     <p>動画ファイル (MP4/MOV) をドラッグ&ドロップ または クリックして選択</p>
   </div>
