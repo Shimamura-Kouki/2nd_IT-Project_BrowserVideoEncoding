@@ -100,16 +100,20 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
         console.log(`WebM file loaded: ${data.videoPackets?.length || 0} video frames, ${data.audioPackets?.length || 0} audio frames`);
         
         // Calculate format information
-        const duration = meta.info?.duration || 0; // Duration in seconds
+        // Note: mkv-demuxer returns duration in MILLISECONDS, not seconds
+        const durationMs = meta.info?.duration || 0;
+        const duration = durationMs / 1000; // Convert to seconds
         const totalFrames = data.videoPackets?.length || 0;
         const framerate = totalFrames > 0 && duration > 0 ? totalFrames / duration : null;
         
+        console.log(`WebM duration: ${durationMs}ms (${duration.toFixed(2)}s), framerate: ${framerate ? framerate.toFixed(2) : 'unknown'} fps`);
+        
         // Estimate bitrates
         const videoBitrate = totalFrames > 0 && duration > 0 
-            ? Math.round((file.size * 8) / duration * 0.9) // 90% for video (rough estimate)
+            ? Math.round((file.size * 8) / duration / 1000000) // Convert to Mbps
             : null;
         const audioBitrate = hasAudio && meta.audio?.rate 
-            ? meta.audio.bitDepth * meta.audio.rate * meta.audio.channels 
+            ? Math.round(meta.audio.bitDepth * meta.audio.rate * meta.audio.channels / 1000) // Convert to Kbps
             : null;
         
         // Prepare detected format info
