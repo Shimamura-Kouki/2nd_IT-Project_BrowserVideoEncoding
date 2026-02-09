@@ -26,7 +26,10 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
         const meta = await demuxer.getMeta();
         onProgress(20); // Metadata parsed
         
-        console.log('WebM metadata:', meta);
+        console.log('━━━ WebM Metadata ━━━');
+        console.log('Video track:', meta.video);
+        console.log('Audio track:', meta.audio);
+        console.log('Info:', meta.info);
         
         // Check if audio track exists
         const hasAudio = !!meta.audio && !!audioDecoder;

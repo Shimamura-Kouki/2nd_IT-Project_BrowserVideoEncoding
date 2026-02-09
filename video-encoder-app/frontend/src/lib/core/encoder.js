@@ -200,7 +200,21 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (config.video.framerateMode === 'original' && videoFormat?.framerate) {
             outputFramerate = videoFormat.framerate;
             console.log(`Using original framerate: ${outputFramerate.toFixed(2)} fps`);
+        } else if (config.video.framerateMode === 'manual') {
+            console.log(`Using manual framerate: ${outputFramerate.toFixed(2)} fps`);
         }
+        
+        // Calculate source framerate
+        const sourceFramerate = videoFormat?.framerate || outputFramerate;
+        console.log(`━━━ Framerate Control ━━━`);
+        console.log(`Source framerate: ${sourceFramerate.toFixed(2)} fps`);
+        console.log(`Target framerate: ${outputFramerate.toFixed(2)} fps`);
+        
+        // Frame filtering state for framerate adjustment
+        let decodedFrameIndex = 0;
+        let nextOutputFrameIndex = 0;
+        const framerateRatio = sourceFramerate / outputFramerate;
+        console.log(`Framerate ratio: ${framerateRatio.toFixed(3)} (will ${framerateRatio > 1 ? 'drop' : 'keep all'} frames)`);
         
         // Calculate actual output dimensions to prevent upscaling
         let outputWidth = config.video.width;
@@ -457,8 +471,29 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 return;
             }
             
+            // Framerate adjustment: determine if this frame should be encoded
+            let shouldEncode = true;
+            if (framerateRatio > 1.0) {
+                // Dropping frames (source FPS > target FPS)
+                // Only encode frames that fall on output intervals
+                const expectedOutputFrame = decodedFrameIndex / framerateRatio;
+                shouldEncode = (Math.round(expectedOutputFrame) === nextOutputFrameIndex);
+                
+                if (shouldEncode) {
+                    nextOutputFrameIndex++;
+                    if (decodedFrameIndex < 10 || decodedFrameIndex % 100 === 0) {
+                        console.log(`Frame ${decodedFrameIndex}: ENCODE (output frame ${nextOutputFrameIndex - 1})`);
+                    }
+                } else {
+                    if (decodedFrameIndex < 10 || decodedFrameIndex % 100 === 0) {
+                        console.log(`Frame ${decodedFrameIndex}: SKIP (framerate adjustment)`);
+                    }
+                }
+            }
+            decodedFrameIndex++;
+            
             frameCount++;
-            if (videoEncoder && videoEncoder.state === 'configured') {
+            if (shouldEncode && videoEncoder && videoEncoder.state === 'configured') {
                 try {
                     videoEncoder.encode(frame);
                 } catch (e) {

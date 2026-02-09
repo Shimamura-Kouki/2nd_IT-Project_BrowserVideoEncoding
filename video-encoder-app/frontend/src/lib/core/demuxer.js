@@ -38,13 +38,21 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
     // Detect file type
     const fileType = detectFileType(file);
     
+    console.log(`━━━ File Loading Debug ━━━`);
+    console.log(`File name: ${file.name}`);
+    console.log(`File size: ${file.size} bytes (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`File type (MIME): ${file.type}`);
+    console.log(`Detected container: ${fileType}`);
+    
     // Route to appropriate demuxer
     if (fileType === 'webm') {
+        console.log(`→ Routing to WebM demuxer (mkv-demuxer)`);
         return demuxWebM(file, videoDecoder, audioDecoder, onReady, onProgress);
     }
     
     // MP4, MOV, and unknown types use MP4Box
     // MP4Box.js supports ISOBMFF containers: MP4, MOV, M4V, 3GP, etc.
+    console.log(`→ Routing to MP4Box demuxer (ISOBMFF container)`);
     return demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress);
 }
 
@@ -82,6 +90,12 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
                 return;
             }
             readyCallbackFired = true;
+            
+            console.log(`MP4Box onReady - File metadata loaded`);
+            console.log(`  Video tracks: ${info.videoTracks?.length || 0}`);
+            console.log(`  Audio tracks: ${info.audioTracks?.length || 0}`);
+            console.log(`  Duration: ${info.duration}ms (${(info.duration / 1000).toFixed(2)}s)`);
+            console.log(`  Timescale: ${info.timescale}`);
             
             const videoTrack = info.videoTracks?.[0];
             const audioTrack = info.audioTracks?.[0];
@@ -138,6 +152,12 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
                 // Calculate total frames from track info
                 totalFrames = videoTrack.nb_samples ?? 0;
                 
+                console.log(`Video track detected:`);
+                console.log(`  Codec: ${videoTrack.codec}`);
+                console.log(`  Resolution: ${videoTrack.video.width}x${videoTrack.video.height}`);
+                console.log(`  Total samples/frames: ${totalFrames}`);
+                console.log(`  Track duration: ${videoTrack.movie_duration} (timescale: ${videoTrack.movie_timescale})`);
+                
                 // Calculate video bitrate from track info
                 let videoBitrate = null;
                 if (videoTrack.bitrate) {
@@ -156,13 +176,18 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
                     }
                 }
                 
+                const calculatedFramerate = videoTrack.movie_duration && videoTrack.nb_samples 
+                    ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
+                    : null;
+                
+                console.log(`  Calculated framerate: ${calculatedFramerate ? calculatedFramerate.toFixed(2) : 'unknown'} fps`);
+                console.log(`  Video bitrate: ${videoBitrate ? (videoBitrate / 1000000).toFixed(2) + ' Mbps' : 'unknown'}`);
+                
                 detectedVideoFormat = {
                     width: videoTrack.video.width,
                     height: videoTrack.video.height,
                     codec: videoTrack.codec,
-                    framerate: videoTrack.movie_duration && videoTrack.nb_samples 
-                        ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
-                        : null,
+                    framerate: calculatedFramerate,
                     bitrate: videoBitrate
                 };
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
