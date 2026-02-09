@@ -153,13 +153,16 @@ tailscale cert --force thinkbook-14-g6-windows.bass-uaru.ts.net
 3. Securityタブで証明書の状態を確認
 
 **よくある証明書エラー:**
-- `NET::ERR_CERT_AUTHORITY_INVALID` → Tailscale証明書は信頼された証明機関のもの。再取得を試す。
+- `NET::ERR_CERT_AUTHORITY_INVALID` → 証明書の信頼に問題がある。Tailscale証明書は通常Let's Encryptから発行されますが、証明書チェーンに問題がある場合があります。証明書を再取得してください。
 - `NET::ERR_CERT_COMMON_NAME_INVALID` → ホスト名が証明書と一致していない。上記の解決方法2を参照。
+- `NET::ERR_CERT_DATE_INVALID` → 証明書の有効期限が切れている。証明書を再取得してください。
 
 **一時的な解決方法:**
 開発環境では、証明書警告を無視して進めます:
 1. エラー画面で「詳細設定」をクリック
 2. 「安全ではないサイトに進む」をクリック
+
+⚠️ 注意: 本番環境では証明書エラーを無視せず、適切に修正してください。
 
 #### 4. Tailscaleの接続状態確認
 
@@ -200,12 +203,18 @@ tailscale cert --force thinkbook-14-g6-windows.bass-uaru.ts.net
 Windowsファイアウォールでポート5173が許可されているか確認:
 
 ```powershell
-# PowerShellで確認
-Get-NetFirewallRule | Where-Object {$_.LocalPort -eq 5173}
+# PowerShellで確認（管理者権限で実行）
+Get-NetFirewallRule | Get-NetFirewallPortFilter | Where-Object {$_.LocalPort -eq 5173}
 
-# または、Windows Defender ファイアウォールの設定を開く
-# 受信規則でポート5173を許可
+# または、GUIで確認
+# 「Windows Defender ファイアウォール」を開く
+# 「詳細設定」→「受信の規則」でポート5173を確認
+
+# ポート5173を許可する（必要な場合）
+New-NetFirewallRule -DisplayName "Vite Dev Server" -Direction Inbound -LocalPort 5173 -Protocol TCP -Action Allow
 ```
+
+**注意:** 通常、localhostへのアクセスはファイアウォールで遮断されません。ファイアウォールが問題になるのは、別のデバイスからアクセスする場合のみです。
 
 #### 推奨: まず試すべき順序
 
