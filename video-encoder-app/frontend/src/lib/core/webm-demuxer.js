@@ -159,11 +159,12 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
             data.audioPackets.sort((a, b) => a.timestamp - b.timestamp);
         }
         
-        // Process video frames
+        // Process video frames with backpressure management
         if (data.videoPackets && data.videoPackets.length > 0) {
             const totalFrames = data.videoPackets.length;
             let lastProgressUpdate = 0;
             const progressInterval = Math.max(1, Math.floor(totalFrames / 100)); // Update max 100 times
+            const MAX_DECODE_QUEUE_SIZE = 30; // Prevent overwhelming decoder
             
             for (let i = 0; i < totalFrames; i++) {
                 const packet = data.videoPackets[i];
@@ -177,6 +178,11 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
                     timestamp: packet.timestamp * 1000, // Convert to microseconds
                     data: frameData,
                 });
+                
+                // Backpressure: Wait if decoder queue is full
+                while (videoDecoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
                 
                 // Decode the chunk
                 videoDecoder.decode(chunk);
@@ -195,8 +201,10 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
             }
         }
         
-        // Process audio frames
+        // Process audio frames with backpressure management
         if (hasAudio && data.audioPackets && data.audioPackets.length > 0) {
+            const MAX_AUDIO_QUEUE_SIZE = 30; // Prevent overwhelming audio decoder
+            
             for (let i = 0; i < data.audioPackets.length; i++) {
                 const packet = data.audioPackets[i];
                 
@@ -209,6 +217,11 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
                     timestamp: packet.timestamp * 1000, // Convert to microseconds
                     data: frameData,
                 });
+                
+                // Backpressure: Wait if decoder queue is full
+                while (audioDecoder.decodeQueueSize >= MAX_AUDIO_QUEUE_SIZE) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
                 
                 // Decode the chunk
                 audioDecoder.decode(chunk);
