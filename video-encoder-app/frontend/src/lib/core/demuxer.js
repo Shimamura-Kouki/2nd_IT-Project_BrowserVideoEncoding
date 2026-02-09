@@ -1,21 +1,24 @@
 import MP4Box from 'mp4box';
 import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE, MAX_MP4BOX_PARSING_ERRORS } from '../constants.js';
-import { demuxWebM } from './webm-demuxer.js';
+// WebM support removed - format not supported
+// import { demuxWebM } from './webm-demuxer.js';
 
 /**
  * ファイルタイプを検出 (拡張子ベース)
  * @param {File} file
- * @returns {string} 'mp4', 'mov', 'webm', or 'unknown'
+ * @returns {string} 'mp4', 'mov', or 'unknown'
  */
 function detectFileType(file) {
     const fileName = file.name.toLowerCase();
-    if (fileName.endsWith('.webm')) return 'webm';
+    // WebM is not supported - treat as unknown
+    if (fileName.endsWith('.webm')) return 'unknown';
     if (fileName.endsWith('.mov')) return 'mov';
     if (fileName.endsWith('.mp4')) return 'mp4';
     if (fileName.endsWith('.m4v')) return 'mp4';
     
     // Check MIME type as fallback
-    if (file.type === 'video/webm') return 'webm';
+    // WebM is not supported - treat as unknown
+    if (file.type === 'video/webm') return 'unknown';
     if (file.type === 'video/quicktime') return 'mov';
     if (file.type === 'video/mp4') return 'mp4';
     
@@ -23,9 +26,8 @@ function detectFileType(file) {
 }
 
 /**
- * 入力動画ファイル (MP4/MOV/WebM) を解析し、WebCodecsのデコーダへ供給する
+ * 入力動画ファイル (MP4/MOV) を解析し、WebCodecsのデコーダへ供給する
  * MP4とMOVはMP4Box.jsで解析 (ISOBMFF container)
- * WebMはwebm-demuxer.jsで処理 (現在は未実装で適切なエラーメッセージを表示)
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder
@@ -44,13 +46,16 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
     console.log(`File type (MIME): ${file.type}`);
     console.log(`Detected container: ${fileType}`);
     
-    // Route to appropriate demuxer
-    if (fileType === 'webm') {
-        console.log(`→ Routing to WebM demuxer (mkv-demuxer)`);
-        return demuxWebM(file, videoDecoder, audioDecoder, onReady, onProgress);
+    // Check for unsupported formats
+    if (fileType === 'unknown') {
+        const isWebM = file.name.toLowerCase().endsWith('.webm') || file.type === 'video/webm';
+        if (isWebM) {
+            throw new Error('WebM形式はサポートされていません。MP4またはMOV形式のファイルを使用してください。\nWebM format is not supported. Please use MP4 or MOV format files.');
+        }
+        throw new Error('対応していないファイル形式です。MP4またはMOV形式のファイルを使用してください。\nUnsupported file format. Please use MP4 or MOV format files.');
     }
     
-    // MP4, MOV, and unknown types use MP4Box
+    // MP4 and MOV use MP4Box
     // MP4Box.js supports ISOBMFF containers: MP4, MOV, M4V, 3GP, etc.
     console.log(`→ Routing to MP4Box demuxer (ISOBMFF container)`);
     return demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress);

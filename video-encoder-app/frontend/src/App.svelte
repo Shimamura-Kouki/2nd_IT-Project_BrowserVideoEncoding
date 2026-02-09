@@ -25,7 +25,7 @@
   let errorLogs: string[] = [];
   let showErrorLogs = false;
   let showSeekWarning = false; // Warning for video seeking limitation
-  let showWebMWarning = false; // Warning for experimental WebM support
+  // WebM support removed - format not supported
 
   // Browser compatibility detection
   let isFirefox = false;
@@ -223,17 +223,11 @@
     file = input.files?.[0] ?? null;
     sourceFileAnalyzed = false; // Reset analysis state when new file is picked
     showSeekWarning = false; // Reset seek warning when new file is picked
-    showWebMWarning = false; // Reset WebM warning when new file is picked
     originalWidth = 0;
     originalHeight = 0;
     originalFramerate = 0;
     originalVideoBitrate = 0;
     originalAudioBitrate = 0;
-    
-    // Check if file is WebM and show warning
-    if (file && (file.name.toLowerCase().endsWith('.webm') || file.type === 'video/webm')) {
-      showWebMWarning = true;
-    }
     
     // Analyze file immediately when selected
     if (file) {
@@ -1125,11 +1119,17 @@
     border: none;
     color: var(--color-warningText);
     cursor: pointer;
-    font-size: 20px;
+    font-size: 24px;
+    line-height: 1;
+    width: 28px;
+    height: 28px;
     padding: 0;
     margin-left: auto;
     opacity: 0.6;
     transition: opacity 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .browser-warning .close-btn:hover {
@@ -1139,6 +1139,9 @@
   .browser-warning-header {
     display: flex;
     align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
     justify-content: space-between;
   }
 
@@ -1190,31 +1193,9 @@
     </div>
   {/if}
 
-  <!-- WebM experimental warning -->
-  {#if showWebMWarning}
-    <div class="browser-warning" style="border-left-color: #FF9800;">
-      <div class="browser-warning-header">
-        <h3>⚠️ WebM形式について</h3>
-        <button class="close-btn" on:click={() => showWebMWarning = false}>×</button>
-      </div>
-      <p>
-        <strong>WebM形式のサポートは実験的です。</strong>
-      </p>
-      <p style="margin-top: 8px;">
-        一部のWebMファイル（特に8K AV1）でデコードエラーが発生することが確認されています。
-      </p>
-      <p style="font-weight: bold; color: #FF9800; margin-top: 8px;">
-        推奨: MP4またはMOV形式をご使用ください
-      </p>
-      <p style="font-size: 14px; margin-top: 8px;">
-        エンコードが途中で失敗する場合は、FFmpegなどでMP4に変換してからご利用ください。
-      </p>
-    </div>
-  {/if}
-
   <div class="dropzone" on:click={() => document.getElementById('fileInput')?.click()}>
-    <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm" on:change={pickFile} />
-    <p>動画ファイル (MP4/MOV/WebM) をドラッグ&ドロップ または クリックして選択</p>
+    <input type="file" id="fileInput" accept="video/mp4,video/quicktime" on:change={pickFile} />
+    <p>動画ファイル (MP4/MOV) をドラッグ&ドロップ または クリックして選択</p>
   </div>
 
   {#if file}
