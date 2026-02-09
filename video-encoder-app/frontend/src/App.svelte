@@ -25,6 +25,7 @@
   let errorLogs: string[] = [];
   let showErrorLogs = false;
   let showSeekWarning = false; // Warning for video seeking limitation
+  let showWebMWarning = false; // Warning for experimental WebM support
 
   // Browser compatibility detection
   let isFirefox = false;
@@ -222,11 +223,17 @@
     file = input.files?.[0] ?? null;
     sourceFileAnalyzed = false; // Reset analysis state when new file is picked
     showSeekWarning = false; // Reset seek warning when new file is picked
+    showWebMWarning = false; // Reset WebM warning when new file is picked
     originalWidth = 0;
     originalHeight = 0;
     originalFramerate = 0;
     originalVideoBitrate = 0;
     originalAudioBitrate = 0;
+    
+    // Check if file is WebM and show warning
+    if (file && (file.name.toLowerCase().endsWith('.webm') || file.type === 'video/webm')) {
+      showWebMWarning = true;
+    }
     
     // Analyze file immediately when selected
     if (file) {
@@ -1179,6 +1186,28 @@
       </p>
       <p style="font-size: 14px; margin-top: 8px;">
         エンコード処理は正常に完了しますが、出力された動画ファイルで特定の位置へのシーク（早送り・巻き戻し）が正常に動作しない可能性があります。
+      </p>
+    </div>
+  {/if}
+
+  <!-- WebM experimental warning -->
+  {#if showWebMWarning}
+    <div class="browser-warning" style="border-left-color: #FF9800;">
+      <div class="browser-warning-header">
+        <h3>⚠️ WebM形式について</h3>
+        <button class="close-btn" on:click={() => showWebMWarning = false}>×</button>
+      </div>
+      <p>
+        <strong>WebM形式のサポートは実験的です。</strong>
+      </p>
+      <p style="margin-top: 8px;">
+        一部のWebMファイル（特に8K AV1）でデコードエラーが発生することが確認されています。
+      </p>
+      <p style="font-weight: bold; color: #FF9800; margin-top: 8px;">
+        推奨: MP4またはMOV形式をご使用ください
+      </p>
+      <p style="font-size: 14px; margin-top: 8px;">
+        エンコードが途中で失敗する場合は、FFmpegなどでMP4に変換してからご利用ください。
       </p>
     </div>
   {/if}
