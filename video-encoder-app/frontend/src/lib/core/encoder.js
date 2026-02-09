@@ -500,7 +500,21 @@ export async function encodeToFile(file, config, onProgress, signal) {
             frameCount++;
             if (shouldEncode && videoEncoder && videoEncoder.state === 'configured') {
                 try {
-                    videoEncoder.encode(frame);
+                    // Resize frame to target resolution before encoding
+                    // This prevents encoder from seeing source resolution pixels which causes high bitrate
+                    if (frame.displayWidth !== outputWidth || frame.displayHeight !== outputHeight) {
+                        // Create a new VideoFrame with target dimensions
+                        // The browser will handle the scaling efficiently
+                        const resizedFrame = new VideoFrame(frame, {
+                            displayWidth: outputWidth,
+                            displayHeight: outputHeight
+                        });
+                        videoEncoder.encode(resizedFrame);
+                        resizedFrame.close();
+                    } else {
+                        // No resizing needed - encode directly
+                        videoEncoder.encode(frame);
+                    }
                 } catch (e) {
                     console.error('VideoEncoder encode error:', e);
                 }
