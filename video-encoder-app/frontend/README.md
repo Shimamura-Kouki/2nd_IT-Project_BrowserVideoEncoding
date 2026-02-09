@@ -24,8 +24,9 @@ WebCodecs APIを使用したブラウザ完結型の動画エンコードアプ�
 ### 使用ライブラリ
 
 - **mp4-muxer** v3.x - MP4コンテナ生成（ストリーム書き込み対応）
-- **mp4box.js** v0.5.x - MP4コンテナ解析・デマックス
+- **mp4box.js** v0.5.x - MP4/MOVコンテナ解析・デマックス
 - **webm-muxer** v5.x - WebMコンテナ生成（ストリーム書き込み対応）
+- **mkv-demuxer** v0.1.x - WebM/Matroskaコンテナ解析・デマックス
 - **@sveltejs/vite-plugin-svelte** v6.x - ViteのSvelteプラグイン
 
 ### 使用ブラウザAPI
@@ -153,7 +154,64 @@ WebCodecs APIを使用したブラウザ完結型の動画エンコードアプ�
     npm run dev -- --host
     ```
 
-ネットワーク内の他デバイスから `http://<your-ip>:5173` でアクセス可能になります。
+    ネットワーク内の他デバイスから `http://<your-ip>:5173` でアクセス可能になります。
+
+5. **Tailscale経由でHTTPSアクセスする場合**
+
+    WebCodecs APIとFileSystem Access APIは**セキュアコンテキスト**が必要なため、
+    Tailscale経由でリモートアクセスする際はHTTPSが必要です。
+
+    **手順:**
+
+    a. Tailscale証明書を取得:
+    ```bash
+    # Tailscale証明書を取得（Tailscale CLIが必要）
+    tailscale cert <your-hostname>.ts.net
+    ```
+    
+    証明書ファイルは以下の場所に保存されます:
+    - Linux/Mac: `/var/lib/tailscale/certs/`
+    - Windows: `%ProgramData%\Tailscale\certs\`
+
+    b. `.env.local`ファイルを作成:
+    ```bash
+    # .env.local.exampleをコピー
+    cp .env.local.example .env.local
+    ```
+
+    c. `.env.local`を編集して証明書パスを設定:
+    ```env
+    SSL_KEY_PATH=/var/lib/tailscale/certs/<your-hostname>.ts.net.key
+    SSL_CERT_PATH=/var/lib/tailscale/certs/<your-hostname>.ts.net.crt
+    ```
+
+    d. 開発サーバーを起動:
+    ```bash
+    npm run dev
+    ```
+
+    e. ブラウザで `https://<your-hostname>.ts.net:5173` にアクセス
+
+    **トラブルシューティング:**
+    - 「このサイトにアクセスできません」エラーが出る場合:
+      - **まず `https://localhost:5173/` を試す** → 動けば証明書/サーバーは正常
+      - Tailscale magic DNSが有効か確認: `tailscale status`
+      - 証明書のホスト名が一致しているか確認（詳細は `../Tailscale_HTTPS_Setup.md` 参照）
+      - 証明書を再取得: `tailscale cert --force <your-hostname>.ts.net`
+      - 代替: ローカルIPアドレスでアクセス（例: `https://192.168.x.x:5173/`）
+    - サーバーが起動しない場合:
+      - `.env.local`のパスが正しいか確認
+      - 証明書ファイルが実際に存在するか確認
+      - サーバー起動時のログで "✅ HTTPS enabled" が表示されているか確認
+    - HTTPSが有効にならない場合:
+      - サーバー起動時のログを確認（詳細なエラーメッセージが表示されます）
+      - 証明書の有効期限を確認（Tailscale証明書は90日で期限切れ）
+
+    **詳細なトラブルシューティング:**
+    - [Tailscale HTTPS Setup Guide](../Tailscale_HTTPS_Setup.md) を参照
+
+    **参考リンク:**
+    - [Tailscale HTTPS証明書の取得方法](https://tailscale.com/kb/1153/enabling-https)
 
 ### ビルド
 
@@ -202,8 +260,17 @@ frontend/
 
 ### 1. 動画エンコード
 
-- 入力: MP4, WebM, その他ブラウザ対応形式
-- 出力: MP4 (H.264/H.265/AAC) または WebM (VP8/VP9/AV1/Opus)
+- **入力対応形式**: 
+  - MP4 (.mp4, .m4v) - H.264/H.265/AV1/AAC ⭐ 推奨
+  - MOV (.mov) - QuickTime形式 (同上のコーデック)
+  - 最大解像度: 8K (7680x4320)
+  - **注意**: WebM形式はサポートされていません
+- **ファイル選択方法**:
+  - **クリック選択**: ファイルピッカーから動画ファイルを選択
+  - **ドラッグ&ドロップ**: ブラウザ画面に動画ファイルを直接ドロップ
+  - 両方とも同じ動作で、MP4/MOV形式のみ対応
+- **出力**: MP4 (H.264/H.265/AAC) または WebM (VP8/VP9/AV1/Opus)
+- **解像度**: 最大8K (7680x4320) まで対応
 - リアルタイム進捗表示（読み込み・エンコード・全体の3つの進捗バー）
 - Androidなどで長時間かかるファイル読み込みと、エンコード処理を別々に表示
 
@@ -395,7 +462,25 @@ A: VP9は約30%、AV1は約50%の圧縮効率向上があるため、同じ品�
 
 ### Q: AAC音声ビットレートでカスタム値が使えない
 
-A: AAC-LC仕様により、有効なビットレートは96, 128, 160, 192 Kbpsのみです。他の値を入力すると、最も近い有効値に自動調整されます。Opusコーデック（WebM）では任意のビットレートが使用可能です。
+A: AAC-LC仕様により、有効なビットレートは96, 128, 160, 192 Kbpsのみです。他の値を入力すると、最も近い有効値に自動調整されます。
+
+### Q: WebMファイルをエンコードしたい
+
+A: **WebM形式の入力はサポートされていません**。WebMファイルをエンコードする場合は、FFmpegなどで事前にMP4/MOV形式に変換してください：
+
+```bash
+ffmpeg -i input.webm -c copy output.mp4
+```
+
+このコマンドでWebMをMP4コンテナに変換できます（再エンコードなし、高速）。
+
+### Q: ドラッグ&ドロップでファイルが読み込まれない
+
+A: 以下を確認してください：
+- ファイル形式がMP4またはMOV形式か確認（WebMは非対応）
+- ファイルを正しくドロップゾーン（点線の枠内）にドロップしているか確認
+- 対応していないファイル形式の場合は、エラーメッセージが表示されます
+- ブラウザがセキュアコンテキスト（HTTPS または localhost）で動作しているか確認
 
 
 ## 参考資料

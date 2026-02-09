@@ -76,6 +76,15 @@ export async function encodeToFile(file, config, onProgress, signal) {
     // Track abort status
     let aborted = false;
     
+    // Framerate control variables (initialized later after metadata extraction)
+    let decodedFrameIndex = 0;
+    let nextOutputFrameIndex = 0;
+    let framerateRatio = 1.0;
+    
+    // Output resolution variables (initialized later after metadata extraction)
+    let outputWidth = 0;
+    let outputHeight = 0;
+    
     // Cleanup function to handle cancellation
     const cleanup = async () => {
         aborted = true;
@@ -200,11 +209,25 @@ export async function encodeToFile(file, config, onProgress, signal) {
         if (config.video.framerateMode === 'original' && videoFormat?.framerate) {
             outputFramerate = videoFormat.framerate;
             console.log(`Using original framerate: ${outputFramerate.toFixed(2)} fps`);
+        } else if (config.video.framerateMode === 'manual') {
+            console.log(`Using manual framerate: ${outputFramerate.toFixed(2)} fps`);
         }
         
+        // Calculate source framerate
+        const sourceFramerate = videoFormat?.framerate || outputFramerate;
+        console.log(`━━━ Framerate Control ━━━`);
+        console.log(`Source framerate: ${sourceFramerate.toFixed(2)} fps`);
+        console.log(`Target framerate: ${outputFramerate.toFixed(2)} fps`);
+        
+        // Initialize framerate control variables
+        decodedFrameIndex = 0;
+        nextOutputFrameIndex = 0;
+        framerateRatio = sourceFramerate / outputFramerate;
+        console.log(`Framerate ratio: ${framerateRatio.toFixed(3)} (will ${framerateRatio > 1 ? 'drop' : 'keep all'} frames)`);
+        
         // Calculate actual output dimensions to prevent upscaling
-        let outputWidth = config.video.width;
-        let outputHeight = config.video.height;
+        outputWidth = config.video.width;
+        outputHeight = config.video.height;
         
         if (videoFormat) {
             const originalWidth = videoFormat.width;
@@ -429,8 +452,54 @@ export async function encodeToFile(file, config, onProgress, signal) {
             error: (e) => console.error('VideoEncoder error', e)
         });
 
+        // Calculate appropriate H.264 level based on resolution
+        // H.264 coded dimensions must be multiples of 16 (macroblock size)
+        // Calculate coded area to determine minimum required level
+        let videoCodec = config.video.codec ?? 'avc1.640028';
+        
+        if (videoCodec.startsWith('avc1.')) {
+            const codedWidth = outputWidth;
+            const codedHeight = Math.ceil(outputHeight / 16) * 16; // Round up to multiple of 16
+            const codedArea = codedWidth * codedHeight;
+            
+            // H.264 Level limits (coded area in macroblocks, 1 macroblock = 16x16 = 256 pixels)
+            // Level 3.0: 40,500 macroblocks = 10,368,000 pixels (e.g., 1920x1088)
+            // Level 3.1: 3,600 macroblocks = 921,600 pixels (e.g., 1280x720)
+            // Level 3.2: 4,800 macroblocks = 1,228,800 pixels (e.g., 1280x1024 or odd 720p)
+            // Level 4.0: 8,192 macroblocks = 2,097,152 pixels (e.g., 2048x1024)
+            // Level 4.1: 8,704 macroblocks = 2,228,224 pixels (e.g., 2048x1088)
+            // Level 4.2: 8,704 macroblocks = 2,228,224 pixels (same as 4.1)
+            // Level 5.0: 22,080 macroblocks = 5,652,480 pixels (e.g., 4096x2304)
+            // Level 5.1: 36,864 macroblocks = 9,437,184 pixels (e.g., 4096x2304)
+            // Level 5.2: 36,864 macroblocks = 9,437,184 pixels (same as 5.1)
+            
+            let avcLevel;
+            if (codedArea <= 921600) {
+                avcLevel = '1f'; // Level 3.1 (720p)
+            } else if (codedArea <= 1228800) {
+                avcLevel = '20'; // Level 3.2 (720p with odd aspect ratios)
+            } else if (codedArea <= 2097152) {
+                avcLevel = '28'; // Level 4.0 (1080p)
+            } else if (codedArea <= 2228224) {
+                avcLevel = '29'; // Level 4.1
+            } else if (codedArea <= 5652480) {
+                avcLevel = '32'; // Level 5.0 (4K)
+            } else {
+                avcLevel = '33'; // Level 5.1 (4K+)
+            }
+            
+            // Replace level in codec string
+            // Format: avc1.PPCCLL where PP=profile, CC=constraints, LL=level
+            const parts = videoCodec.split('.');
+            if (parts.length === 2 && parts[1].length === 6) {
+                const profileAndConstraints = parts[1].substring(0, 4);
+                videoCodec = `avc1.${profileAndConstraints}${avcLevel}`;
+                console.log(`Adjusted H.264 codec level for ${outputWidth}x${outputHeight} (coded ${codedWidth}x${codedHeight}, ${codedArea} pixels): ${config.video.codec} → ${videoCodec}`);
+            }
+        }
+
         videoEncoder.configure({
-            codec: config.video.codec ?? 'avc1.640028',
+            codec: videoCodec,
             width: outputWidth,
             height: outputHeight,
             // Include bitrate only when not in quantizer mode
@@ -457,10 +526,45 @@ export async function encodeToFile(file, config, onProgress, signal) {
                 return;
             }
             
+            // Framerate adjustment: determine if this frame should be encoded
+            let shouldEncode = true;
+            if (framerateRatio > 1.0) {
+                // Dropping frames (source FPS > target FPS)
+                // Only encode frames that fall on output intervals
+                const expectedOutputFrame = decodedFrameIndex / framerateRatio;
+                shouldEncode = (Math.round(expectedOutputFrame) === nextOutputFrameIndex);
+                
+                if (shouldEncode) {
+                    nextOutputFrameIndex++;
+                    if (decodedFrameIndex < 10 || decodedFrameIndex % 100 === 0) {
+                        console.log(`Frame ${decodedFrameIndex}: ENCODE (output frame ${nextOutputFrameIndex - 1})`);
+                    }
+                } else {
+                    if (decodedFrameIndex < 10 || decodedFrameIndex % 100 === 0) {
+                        console.log(`Frame ${decodedFrameIndex}: SKIP (framerate adjustment)`);
+                    }
+                }
+            }
+            decodedFrameIndex++;
+            
             frameCount++;
-            if (videoEncoder && videoEncoder.state === 'configured') {
+            if (shouldEncode && videoEncoder && videoEncoder.state === 'configured') {
                 try {
-                    videoEncoder.encode(frame);
+                    // Resize frame to target resolution before encoding
+                    // This prevents encoder from seeing source resolution pixels which causes high bitrate
+                    if (frame.displayWidth !== outputWidth || frame.displayHeight !== outputHeight) {
+                        // Create a new VideoFrame with target dimensions
+                        // The browser will handle the scaling efficiently
+                        const resizedFrame = new VideoFrame(frame, {
+                            displayWidth: outputWidth,
+                            displayHeight: outputHeight
+                        });
+                        videoEncoder.encode(resizedFrame);
+                        resizedFrame.close();
+                    } else {
+                        // No resizing needed - encode directly
+                        videoEncoder.encode(frame);
+                    }
                 } catch (e) {
                     console.error('VideoEncoder encode error:', e);
                 }
@@ -586,6 +690,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
     const MAX_STALL_TIME_MS = 60000; // Maximum time without ANY chunks arriving before considering stalled (60s)
                                      // Increased from 30s to accommodate Firefox's extremely slow AV1 encoder
+    const MAX_STALL_TIME_HIGH_COMPLETION_MS = 120000; // More lenient timeout (120s) when >95% complete
+                                                       // Last few chunks often take longer due to encoder finalization
+    const HIGH_COMPLETION_THRESHOLD = 0.95; // Consider 95%+ as "nearly complete"
     const POLL_INTERVAL_MS = 50; // Check every 50ms
     
     console.log('Waiting for all encoder chunks to complete...');
@@ -619,15 +726,27 @@ export async function encodeToFile(file, config, onProgress, signal) {
         const elapsedTotal = now - waitStartTime;
         const timeSinceLastChunk = now - lastChunkArrivalTime;
         
-        // Safety timeout - only if encoding has truly stalled (no chunks for MAX_STALL_TIME_MS)
+        // Calculate completion percentage
+        const completionRatio = totalFrames > 0 ? totalVideoChunksReceived / totalFrames : 0;
+        
+        // Use more lenient timeout when encoding is nearly complete (>95%)
+        // Last few chunks often take longer due to encoder finalization
+        const effectiveStallTimeout = completionRatio >= HIGH_COMPLETION_THRESHOLD 
+            ? MAX_STALL_TIME_HIGH_COMPLETION_MS 
+            : MAX_STALL_TIME_MS;
+        
+        // Safety timeout - only if encoding has truly stalled (no chunks for timeout period)
         // This allows slow encoders (like Firefox AV1) to take as long as needed, as long as they're making progress
-        if (timeSinceLastChunk > MAX_STALL_TIME_MS) {
+        if (timeSinceLastChunk > effectiveStallTimeout) {
             console.warn(`Encoding appears stalled - no chunks for ${(timeSinceLastChunk / 1000).toFixed(1)}s`);
             console.warn(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}, pending video=${pendingVideoChunks}, pending audio=${pendingAudioChunks}`);
             console.warn(`Encoder start status: video=${videoEncoderStarted}, audio=${audioEncoderStarted}`);
             if (totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
                 const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
                 console.warn(`Only received ${totalVideoChunksReceived}/${totalFrames} chunks (${coverage}%) before stall`);
+                if (completionRatio >= HIGH_COMPLETION_THRESHOLD) {
+                    console.warn('Note: Encoding is >95% complete - this may be normal encoder finalization delay');
+                }
             }
             break;
         }

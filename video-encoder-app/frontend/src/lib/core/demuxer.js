@@ -1,8 +1,33 @@
 import MP4Box from 'mp4box';
 import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE, MAX_MP4BOX_PARSING_ERRORS } from '../constants.js';
+// WebM support removed - format not supported
+// import { demuxWebM } from './webm-demuxer.js';
 
 /**
- * 入力MP4を解析し、WebCodecsのデコーダへ供給する
+ * ファイルタイプを検出 (拡張子ベース)
+ * @param {File} file
+ * @returns {string} 'mp4', 'mov', or 'unknown'
+ */
+function detectFileType(file) {
+    const fileName = file.name.toLowerCase();
+    // WebM is not supported - treat as unknown
+    if (fileName.endsWith('.webm')) return 'unknown';
+    if (fileName.endsWith('.mov')) return 'mov';
+    if (fileName.endsWith('.mp4')) return 'mp4';
+    if (fileName.endsWith('.m4v')) return 'mp4';
+    
+    // Check MIME type as fallback
+    // WebM is not supported - treat as unknown
+    if (file.type === 'video/webm') return 'unknown';
+    if (file.type === 'video/quicktime') return 'mov';
+    if (file.type === 'video/mp4') return 'mp4';
+    
+    return 'unknown';
+}
+
+/**
+ * 入力動画ファイル (MP4/MOV) を解析し、WebCodecsのデコーダへ供給する
+ * MP4とMOVはMP4Box.jsで解析 (ISOBMFF container)
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder
@@ -12,6 +37,41 @@ import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE, MAX_MP4BOX_PARSIN
  * @throws {Error} When too many MP4Box parsing errors occur or file chunk processing fails
  */
 export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, onProgress) {
+    // Detect file type
+    const fileType = detectFileType(file);
+    
+    console.log(`━━━ File Loading Debug ━━━`);
+    console.log(`File name: ${file.name}`);
+    console.log(`File size: ${file.size} bytes (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`File type (MIME): ${file.type}`);
+    console.log(`Detected container: ${fileType}`);
+    
+    // Check for unsupported formats
+    if (fileType === 'unknown') {
+        const isWebM = file.name.toLowerCase().endsWith('.webm') || file.type === 'video/webm';
+        if (isWebM) {
+            throw new Error('WebM形式はサポートされていません。MP4またはMOV形式のファイルを使用してください。\nWebM format is not supported. Please use MP4 or MOV format files.');
+        }
+        throw new Error('対応していないファイル形式です。MP4またはMOV形式のファイルを使用してください。\nUnsupported file format. Please use MP4 or MOV format files.');
+    }
+    
+    // MP4 and MOV use MP4Box
+    // MP4Box.js supports ISOBMFF containers: MP4, MOV, M4V, 3GP, etc.
+    console.log(`→ Routing to MP4Box demuxer (ISOBMFF container)`);
+    return demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress);
+}
+
+/**
+ * MP4/MOV demuxer using MP4Box.js
+ * Supports all ISOBMFF container formats
+ * @param {File} file
+ * @param {VideoDecoder} videoDecoder
+ * @param {AudioDecoder|null} audioDecoder
+ * @param {Function} onReady
+ * @param {Function} onProgress
+ * @returns {Promise<{hasAudio: boolean}>}
+ */
+function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
     return new Promise((resolve, reject) => {
         const mp4boxfile = MP4Box.createFile();
         let videoTrackId = null;
@@ -35,6 +95,12 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 return;
             }
             readyCallbackFired = true;
+            
+            console.log(`MP4Box onReady - File metadata loaded`);
+            console.log(`  Video tracks: ${info.videoTracks?.length || 0}`);
+            console.log(`  Audio tracks: ${info.audioTracks?.length || 0}`);
+            console.log(`  Duration: ${info.duration}ms (${(info.duration / 1000).toFixed(2)}s)`);
+            console.log(`  Timescale: ${info.timescale}`);
             
             const videoTrack = info.videoTracks?.[0];
             const audioTrack = info.audioTracks?.[0];
@@ -60,8 +126,16 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                     bitrate: audioBitrate
                 };
                 
+                // Fix incomplete AAC codec strings from MP4Box
+                // MP4Box sometimes returns just "mp4a" instead of "mp4a.40.2"
+                let audioCodec = audioTrack.codec;
+                if (audioCodec === 'mp4a') {
+                    audioCodec = 'mp4a.40.2'; // Default to AAC-LC
+                    console.log('Fixed incomplete audio codec: mp4a → mp4a.40.2 (AAC-LC)');
+                }
+                
                 const audioConfig = {
-                    codec: audioTrack.codec,
+                    codec: audioCodec,
                     sampleRate: audioTrack.audio.sample_rate,
                     numberOfChannels: audioTrack.audio.channel_count
                 };
@@ -91,6 +165,12 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 // Calculate total frames from track info
                 totalFrames = videoTrack.nb_samples ?? 0;
                 
+                console.log(`Video track detected:`);
+                console.log(`  Codec: ${videoTrack.codec}`);
+                console.log(`  Resolution: ${videoTrack.video.width}x${videoTrack.video.height}`);
+                console.log(`  Total samples/frames: ${totalFrames}`);
+                console.log(`  Track duration: ${videoTrack.movie_duration} (timescale: ${videoTrack.movie_timescale})`);
+                
                 // Calculate video bitrate from track info
                 let videoBitrate = null;
                 if (videoTrack.bitrate) {
@@ -109,23 +189,40 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                     }
                 }
                 
+                const calculatedFramerate = videoTrack.movie_duration && videoTrack.nb_samples 
+                    ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
+                    : null;
+                
+                console.log(`  Calculated framerate: ${calculatedFramerate ? calculatedFramerate.toFixed(2) : 'unknown'} fps`);
+                console.log(`  Video bitrate: ${videoBitrate ? (videoBitrate / 1000000).toFixed(2) + ' Mbps' : 'unknown'}`);
+                
                 detectedVideoFormat = {
                     width: videoTrack.video.width,
                     height: videoTrack.video.height,
                     codec: videoTrack.codec,
-                    framerate: videoTrack.movie_duration && videoTrack.nb_samples 
-                        ? (videoTrack.nb_samples * videoTrack.movie_timescale / videoTrack.movie_duration)
-                        : null,
+                    framerate: calculatedFramerate,
                     bitrate: videoBitrate
                 };
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);
-                videoDecoder.configure({
+                
+                console.log('Configuring VideoDecoder with:');
+                console.log('  Codec:', videoTrack.codec);
+                console.log('  Resolution:', videoTrack.video.width, 'x', videoTrack.video.height);
+                console.log('  Description buffer:', description ? `${description.length} bytes` : 'null');
+                
+                const config = {
                     codec: videoTrack.codec,
                     codedWidth: videoTrack.video.width,
-                    codedHeight: videoTrack.video.height,
-                    description
-                });
+                    codedHeight: videoTrack.video.height
+                };
+                
+                // Only add description if it exists (some codecs like VP8/VP9 may not need it)
+                if (description) {
+                    config.description = description;
+                }
+                
+                videoDecoder.configure(config);
                 mp4boxfile.setExtractionOptions(videoTrackId, 'video', { nbSamples: 100 });
             }
 
@@ -155,9 +252,26 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
             // Otherwise, continue processing - some errors are recoverable
         };
 
-    mp4boxfile.onSamples = (track_id, _user, samples) => {
-        if (track_id === videoTrackId) {
-            for (const sample of samples) {
+    // Backpressure management for decoder queues
+    // For 8K video, we need to prevent overwhelming the decoder
+    const MAX_DECODE_QUEUE_SIZE = 30; // Max frames in decoder queue
+    let pendingSamples = [];
+    let processingQueue = false;
+
+    const processQueuedSamples = async () => {
+        if (processingQueue) return;
+        processingQueue = true;
+
+        while (pendingSamples.length > 0) {
+            const { track_id, sample } = pendingSamples[0];
+
+            if (track_id === videoTrackId) {
+                // Check video decoder queue size before adding more frames
+                while (videoDecoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) {
+                    // Wait for queue to drain
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+
                 const chunk = new EncodedVideoChunk({
                     type: sample.is_sync ? 'key' : 'delta',
                     timestamp: Math.round(1e6 * sample.cts / sample.timescale),
@@ -165,9 +279,18 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                     data: sample.data
                 });
                 videoDecoder.decode(chunk);
-            }
-        } else if (track_id === audioTrackId) {
-            for (const sample of samples) {
+            } else if (track_id === audioTrackId) {
+                // Check if audio decoder is still in valid state
+                if (!audioDecoder || audioDecoder.state !== 'configured') {
+                    console.warn(`AudioDecoder not ready for sample at ${sample.cts}, state: ${audioDecoder?.state || 'null'}`);
+                    return;
+                }
+                
+                // Check audio decoder queue size
+                while (audioDecoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+
                 const chunk = new EncodedAudioChunk({
                     type: 'key',
                     timestamp: Math.round(1e6 * sample.cts / sample.timescale),
@@ -176,7 +299,20 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
                 });
                 audioDecoder.decode(chunk);
             }
+
+            pendingSamples.shift();
         }
+
+        processingQueue = false;
+    };
+
+    mp4boxfile.onSamples = (track_id, _user, samples) => {
+        // Queue all samples for processing
+        for (const sample of samples) {
+            pendingSamples.push({ track_id, sample });
+        }
+        // Start processing queue asynchronously
+        processQueuedSamples();
     };
 
     const chunkSize = 1024 * 1024 * 5;
@@ -234,14 +370,39 @@ export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, 
 
 function generateDescriptionBuffer(entry) {
     if (entry.avcC) {
+        // H.264/AVC codec configuration
         const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
         entry.avcC.write(stream);
-        return new Uint8Array(stream.buffer.slice(8));
+        const description = new Uint8Array(stream.buffer.slice(8));
+        console.log('H.264 description extracted:', description.length, 'bytes');
+        return description;
     } else if (entry.hvcC) {
+        // H.265/HEVC codec configuration
         const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
         entry.hvcC.write(stream);
-        return new Uint8Array(stream.buffer.slice(8));
+        const description = new Uint8Array(stream.buffer.slice(8));
+        console.log('H.265 description extracted:', description.length, 'bytes');
+        return description;
+    } else if (entry.av1C) {
+        // AV1 codec configuration
+        const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
+        entry.av1C.write(stream);
+        const description = new Uint8Array(stream.buffer.slice(8));
+        console.log('AV1 description extracted:', description.length, 'bytes');
+        return description;
+    } else if (entry.vpcC || entry.vp09) {
+        // VP9 codec configuration
+        // VP9 in MP4 uses vpcC box, but WebCodecs VideoDecoder for VP9
+        // typically doesn't require a description buffer
+        console.log('VP9 codec detected, no description buffer needed');
+        return null;
+    } else if (entry.type === 'vp08') {
+        // VP8 codec - no description needed
+        console.log('VP8 codec detected, no description buffer needed');
+        return null;
     }
+    
+    console.warn('Unknown codec type in entry:', entry.type, '- no description buffer generated');
     return null;
 }
 
