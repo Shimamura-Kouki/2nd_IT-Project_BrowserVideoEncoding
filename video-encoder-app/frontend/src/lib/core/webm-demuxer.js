@@ -184,6 +184,12 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
                     await new Promise(resolve => setTimeout(resolve, 10));
                 }
                 
+                // Check decoder state before decoding
+                if (videoDecoder.state !== 'configured') {
+                    console.error(`VideoDecoder not ready at frame ${i}/${totalFrames}, state: ${videoDecoder.state}`);
+                    throw new Error(`VideoDecoder closed or failed at frame ${i}/${totalFrames}. The decoder may have encountered an error with a previous frame.`);
+                }
+                
                 // Decode the chunk
                 videoDecoder.decode(chunk);
                 
@@ -221,6 +227,12 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
                 // Backpressure: Wait if decoder queue is full
                 while (audioDecoder.decodeQueueSize >= MAX_AUDIO_QUEUE_SIZE) {
                     await new Promise(resolve => setTimeout(resolve, 10));
+                }
+                
+                // Check decoder state before decoding
+                if (audioDecoder.state !== 'configured') {
+                    console.error(`AudioDecoder not ready at frame ${i}/${data.audioPackets.length}, state: ${audioDecoder.state}`);
+                    throw new Error(`AudioDecoder closed or failed at frame ${i}/${data.audioPackets.length}`);
                 }
                 
                 // Decode the chunk
