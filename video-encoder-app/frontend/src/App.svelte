@@ -1141,7 +1141,6 @@
     align-items: center;
     gap: 16px;
     margin-bottom: 8px;
-  }
     justify-content: space-between;
   }
 
