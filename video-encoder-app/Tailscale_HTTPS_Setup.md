@@ -81,30 +81,139 @@ ls -l /var/lib/tailscale/certs/
 # .env.localのパスを修正
 ```
 
-### エラー: "このサイトにアクセスできません"
+### エラー: "このサイトにアクセスできません" (サーバーは起動しているのにアクセスできない)
 
-**チェック項目**:
+このエラーが出る場合、サーバーは正常に起動していますが、ブラウザが接続できない状態です。
 
-1. **サーバーが起動しているか確認**
-   ```bash
-   npm run dev
-   ```
-   
-2. **HTTPSが有効か確認**
-   - ログに「✅ HTTPS enabled」が表示されているか
+**状況の確認:**
+サーバーログに以下が表示されていれば、サーバー自体は正常です:
+```
+✅ HTTPS enabled with certificates from .env.local
+➜  Local:   https://thinkbook-14-g6-windows.bass-uaru.ts.net:5173/
+```
 
-3. **証明書の有効期限を確認**
-   ```bash
-   openssl x509 -in /var/lib/tailscale/certs/<your-hostname>.ts.net.crt -noout -dates
-   ```
+**原因と解決方法:**
 
-4. **証明書を再取得**
-   ```bash
-   tailscale cert --force <your-hostname>.ts.net
-   ```
+#### 1. DNS解決の問題（最も多い原因）
 
-5. **ファイアウォールを確認**
-   - ポート5173が開いているか確認
+Tailscaleホスト名がブラウザで解決できない可能性があります。
+
+**解決方法A: ローカルホストでアクセス**
+```
+https://localhost:5173/
+```
+これで動作すれば、証明書とサーバーは正常です。
+
+**解決方法B: ローカルIPアドレスでアクセス**
+サーバーログに表示されているIPアドレスを使用:
+```
+https://192.168.x.x:5173/
+```
+⚠️ 注意: IPアドレスでアクセスすると証明書エラーが出ますが、開発環境では「詳細設定」→「安全ではないサイトに進む」で続行できます。
+
+**解決方法C: Tailscaleのmagic DNSを有効化**
+```powershell
+# Windows PowerShell
+tailscale status
+# "MagicDNS: enabled" と表示されるか確認
+
+# 無効の場合、Tailscale管理画面で有効化
+# https://login.tailscale.com/admin/dns
+```
+
+#### 2. 証明書のホスト名不一致
+
+証明書のCommon Name (CN)またはSANが正しいか確認:
+
+**Windows (PowerShell):**
+```powershell
+# 証明書の詳細を確認
+openssl x509 -in C:\Users\kouki\thinkbook-14-g6-windows.bass-uaru.ts.net.crt -text -noout | Select-String "Subject:|DNS:"
+
+# 出力例:
+# Subject: CN=thinkbook-14-g6-windows.bass-uaru.ts.net
+# DNS:thinkbook-14-g6-windows.bass-uaru.ts.net
+```
+
+**Linux/Mac:**
+```bash
+openssl x509 -in /var/lib/tailscale/certs/<hostname>.ts.net.crt -text -noout | grep -A1 "Subject Alternative Name"
+```
+
+ホスト名が一致しない場合、証明書を再取得:
+```powershell
+tailscale cert --force thinkbook-14-g6-windows.bass-uaru.ts.net
+```
+
+#### 3. ブラウザの証明書エラー
+
+**Chrome/Edgeの場合:**
+1. DevToolsを開く (F12)
+2. Consoleタブで赤いエラーを確認
+3. Securityタブで証明書の状態を確認
+
+**よくある証明書エラー:**
+- `NET::ERR_CERT_AUTHORITY_INVALID` → Tailscale証明書は信頼された証明機関のもの。再取得を試す。
+- `NET::ERR_CERT_COMMON_NAME_INVALID` → ホスト名が証明書と一致していない。上記の解決方法2を参照。
+
+**一時的な解決方法:**
+開発環境では、証明書警告を無視して進めます:
+1. エラー画面で「詳細設定」をクリック
+2. 「安全ではないサイトに進む」をクリック
+
+#### 4. Tailscaleの接続状態確認
+
+```powershell
+# Tailscaleの状態確認
+tailscale status
+
+# 出力例:
+# 100.x.x.x    thinkbook-14-g6-windows  your-email@  windows active; ...
+```
+
+`active`と表示されていない場合:
+```powershell
+tailscale up
+```
+
+#### 5. 証明書の有効期限確認
+
+Tailscale証明書は90日で期限切れになります:
+
+**Windows:**
+```powershell
+openssl x509 -in C:\Users\kouki\thinkbook-14-g6-windows.bass-uaru.ts.net.crt -noout -dates
+```
+
+**Linux/Mac:**
+```bash
+openssl x509 -in /var/lib/tailscale/certs/<hostname>.ts.net.crt -noout -dates
+```
+
+期限切れの場合、再取得:
+```powershell
+tailscale cert --force thinkbook-14-g6-windows.bass-uaru.ts.net
+```
+
+#### 6. ファイアウォール確認
+
+Windowsファイアウォールでポート5173が許可されているか確認:
+
+```powershell
+# PowerShellで確認
+Get-NetFirewallRule | Where-Object {$_.LocalPort -eq 5173}
+
+# または、Windows Defender ファイアウォールの設定を開く
+# 受信規則でポート5173を許可
+```
+
+#### 推奨: まず試すべき順序
+
+1. ✅ `https://localhost:5173/` でアクセス → 動けば証明書は正常
+2. ✅ Tailscale statusを確認 → activeであることを確認
+3. ✅ 証明書を再取得 → `tailscale cert --force <hostname>`
+4. ✅ ブラウザのキャッシュをクリア
+5. ✅ それでもダメなら、ローカルIPアドレスで試す
 
 ### HTTPモードで起動したい場合
 

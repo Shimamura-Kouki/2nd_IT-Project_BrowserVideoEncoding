@@ -193,14 +193,21 @@ WebCodecs APIを使用したブラウザ完結型の動画エンコードアプ�
 
     **トラブルシューティング:**
     - 「このサイトにアクセスできません」エラーが出る場合:
+      - **まず `https://localhost:5173/` を試す** → 動けば証明書/サーバーは正常
+      - Tailscale magic DNSが有効か確認: `tailscale status`
+      - 証明書のホスト名が一致しているか確認（詳細は `../Tailscale_HTTPS_Setup.md` 参照）
+      - 証明書を再取得: `tailscale cert --force <your-hostname>.ts.net`
+      - 代替: ローカルIPアドレスでアクセス（例: `https://192.168.x.x:5173/`）
+    - サーバーが起動しない場合:
       - `.env.local`のパスが正しいか確認
-      - 証明書ファイルが実際に存在するか確認: `ls -l /path/to/cert`
-      - 証明書ファイルの読み取り権限があるか確認
+      - 証明書ファイルが実際に存在するか確認
       - サーバー起動時のログで "✅ HTTPS enabled" が表示されているか確認
     - HTTPSが有効にならない場合:
       - サーバー起動時のログを確認（詳細なエラーメッセージが表示されます）
       - 証明書の有効期限を確認（Tailscale証明書は90日で期限切れ）
-      - 証明書を再取得: `tailscale cert --force <your-hostname>.ts.net`
+
+    **詳細なトラブルシューティング:**
+    - [Tailscale HTTPS Setup Guide](../Tailscale_HTTPS_Setup.md) を参照
 
     **参考リンク:**
     - [Tailscale HTTPS証明書の取得方法](https://tailscale.com/kb/1153/enabling-https)
