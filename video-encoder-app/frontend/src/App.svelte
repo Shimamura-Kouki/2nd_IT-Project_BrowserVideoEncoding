@@ -688,9 +688,10 @@
           width = dims.width;
           height = dims.height;
         } else {
-          // Fallback if file not analyzed yet
-          width = 1920;
-          height = 1080;
+          // Fallback: use preset's target dimensions (set by applyPreset)
+          // This ensures codec level matches resolution even if file not analyzed yet
+          width = manualWidth || 1920;
+          height = manualHeight || 1080;
         }
       } else if (resolutionMode === 'manual') {
         width = manualWidth;
