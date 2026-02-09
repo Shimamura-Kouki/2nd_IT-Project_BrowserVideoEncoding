@@ -36,7 +36,8 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
         
         // Configure video decoder
         if (meta.video) {
-            const videoCodec = getWebCodecsVideoCodec(meta.video.codecID, meta.video);
+            const videoCodecPrivate = meta.video.codecPrivate ? new Uint8Array(meta.video.codecPrivate) : null;
+            const videoCodec = getWebCodecsVideoCodec(meta.video.codecID, meta.video, videoCodecPrivate);
             if (!videoCodec) {
                 throw new Error(`Unsupported video codec: ${meta.video.codecID}`);
             }
@@ -283,12 +284,70 @@ function readFileChunk(file, start, end) {
 }
 
 /**
+ * Parse AV1 codec string from CodecPrivate (AV1CodecConfigurationRecord)
+ * @param {Uint8Array} codecPrivate - AV1 codec private data (av1C box)
+ * @returns {string|null} - Parsed codec string or null if invalid
+ */
+function parseAV1CodecString(codecPrivate) {
+    if (!codecPrivate || codecPrivate.length < 4) {
+        return null;
+    }
+    
+    try {
+        // AV1CodecConfigurationRecord structure:
+        // Byte 0: marker (1 bit) + version (7 bits)
+        // Byte 1: seq_profile (3 bits) + seq_level_idx_0 (5 bits)
+        // Byte 2: tier (1 bit) + high_bitdepth (1 bit) + ...
+        // Byte 3: chroma info...
+        
+        const byte1 = codecPrivate[1];
+        const byte2 = codecPrivate[2];
+        
+        // Extract seq_profile (top 3 bits of byte 1)
+        const seq_profile = (byte1 >> 5) & 0x07;
+        
+        // Extract seq_level_idx (bottom 5 bits of byte 1)
+        const seq_level_idx = byte1 & 0x1F;
+        
+        // Extract tier (top bit of byte 2): 0=M (Main), 1=H (High)
+        const tier = (byte2 >> 7) & 0x01;
+        const tierStr = tier ? 'H' : 'M';
+        
+        // Extract bit depth info
+        const high_bitdepth = (byte2 >> 6) & 0x01;
+        const twelve_bit = (byte2 >> 5) & 0x01;
+        let bitdepth = 8;
+        if (high_bitdepth) {
+            bitdepth = twelve_bit ? 12 : 10;
+        }
+        
+        // Format as 2-digit hex for level
+        const levelHex = seq_level_idx.toString(16).padStart(2, '0').toUpperCase();
+        
+        // Build codec string: av01.P.LLT.DD
+        // P = profile (0, 1, 2)
+        // LL = level (hex)
+        // T = tier (M or H)
+        // DD = bit depth (08, 10, 12)
+        const codec = `av01.${seq_profile}.${levelHex}${tierStr}.${bitdepth.toString().padStart(2, '0')}`;
+        
+        console.log(`AV1 codec parsed from CodecPrivate: ${codec} (profile=${seq_profile}, level=${seq_level_idx}, tier=${tierStr}, bitdepth=${bitdepth})`);
+        
+        return codec;
+    } catch (error) {
+        console.error('Error parsing AV1 codec string:', error);
+        return null;
+    }
+}
+
+/**
  * Convert Matroska codec ID to WebCodecs codec string for video
  * @param {string} codecID - Matroska codec ID (e.g., "V_VP8", "V_VP9", "V_AV1")
  * @param {Object} videoMeta - Video metadata from mkv-demuxer
+ * @param {Uint8Array} codecPrivate - Codec private data
  * @returns {string|null} - WebCodecs codec string or null if unsupported
  */
-function getWebCodecsVideoCodec(codecID, videoMeta) {
+function getWebCodecsVideoCodec(codecID, videoMeta, codecPrivate) {
     if (codecID === 'V_VP8') {
         return 'vp8';
     }
@@ -300,7 +359,15 @@ function getWebCodecsVideoCodec(codecID, videoMeta) {
     }
     
     if (codecID === 'V_AV1') {
-        // Derive AV1 level from resolution
+        // Try to parse actual codec string from CodecPrivate first
+        if (codecPrivate && codecPrivate.length >= 4) {
+            const parsedCodec = parseAV1CodecString(codecPrivate);
+            if (parsedCodec) {
+                return parsedCodec;
+            }
+        }
+        
+        // Fallback: Derive AV1 level from resolution
         // AV1 spec defines levels based on resolution and framerate
         const width = videoMeta?.width || 0;
         const height = videoMeta?.height || 0;
@@ -311,22 +378,25 @@ function getWebCodecsVideoCodec(codecID, videoMeta) {
         // Determine level based on resolution
         // Reference: AV1 Bitstream & Decoding Process Specification
         if (pixels <= 147456) { // 512x288 or smaller
-            level = '00'; // Level 2.0
+            level = '00M'; // Level 2.0
         } else if (pixels <= 278784) { // 640x480 or smaller  
-            level = '01'; // Level 2.1
+            level = '01M'; // Level 2.1
         } else if (pixels <= 665856) { // 1024x768 or smaller
-            level = '02'; // Level 2.2/2.3
+            level = '02M'; // Level 2.2/2.3
         } else if (pixels <= 2228224) { // 1920x1088 or smaller (1080p)
             level = '04M'; // Level 3.0
         } else if (pixels <= 8912896) { // 3840x2160 or smaller (4K)
             level = '08M'; // Level 4.0
         } else if (pixels <= 35651584) { // 7680x4320 or smaller (8K)
-            level = '12M'; // Level 5.1
+            level = '0DM'; // Level 5.1
         } else {
-            level = '16M'; // Level 6.0 (highest)
+            level = '12M'; // Level 6.0 (highest)
         }
         
+        console.log('AV1 codec derived (fallback): av01.0.' + level + '.08 for ' + width + 'x' + height + ' (' + pixels + ' pixels)');
+        
         // AV1 codec string: av01.P.LLT.DD
+        // P = profile (0 = Main)
         // P = profile (0 = Main)
         // LL = level
         // T = tier (M = Main, H = High)
