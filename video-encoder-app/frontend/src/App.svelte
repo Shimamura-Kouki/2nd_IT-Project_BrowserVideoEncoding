@@ -1183,8 +1183,8 @@
   {/if}
 
   <div class="dropzone" on:click={() => document.getElementById('fileInput')?.click()}>
-    <input type="file" id="fileInput" accept="video/mp4" on:change={pickFile} />
-    <p>MP4ファイルをドラッグ&ドロップ または クリックして選択</p>
+    <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm" on:change={pickFile} />
+    <p>動画ファイル (MP4/MOV/WebM) をドラッグ&ドロップ または クリックして選択</p>
   </div>
 
   {#if file}
