@@ -33,7 +33,7 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
         
         // Configure video decoder
         if (meta.video) {
-            const videoCodec = getWebCodecsVideoCodec(meta.video.codecID);
+            const videoCodec = getWebCodecsVideoCodec(meta.video.codecID, meta.video);
             if (!videoCodec) {
                 throw new Error(`Unsupported video codec: ${meta.video.codecID}`);
             }
@@ -51,6 +51,20 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
             }
             
             console.log(`Configuring VideoDecoder: codec=${videoConfig.codec}, ${meta.video.width}x${meta.video.height}`);
+            
+            // Check if this configuration is supported before attempting to configure
+            try {
+                const support = await VideoDecoder.isConfigSupported(videoConfig);
+                if (!support.supported) {
+                    console.warn('VideoDecoder configuration not fully supported:', videoConfig);
+                    throw new Error(`VideoDecoder does not support codec configuration: ${videoConfig.codec} ${meta.video.width}x${meta.video.height}`);
+                }
+                console.log('VideoDecoder configuration is supported');
+            } catch (e) {
+                console.error('Error checking VideoDecoder support:', e);
+                // Continue anyway - some browsers may not support isConfigSupported
+            }
+            
             videoDecoder.configure(videoConfig);
             console.log('VideoDecoder configured successfully');
         }
@@ -140,7 +154,11 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
         
         // Process video frames
         if (data.videoPackets && data.videoPackets.length > 0) {
-            for (let i = 0; i < data.videoPackets.length; i++) {
+            const totalFrames = data.videoPackets.length;
+            let lastProgressUpdate = 0;
+            const progressInterval = Math.max(1, Math.floor(totalFrames / 100)); // Update max 100 times
+            
+            for (let i = 0; i < totalFrames; i++) {
                 const packet = data.videoPackets[i];
                 
                 // Read frame data from file
@@ -156,10 +174,16 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
                 // Decode the chunk
                 videoDecoder.decode(chunk);
                 
-                // Update progress
-                if (i % 10 === 0) {
-                    const progress = 30 + Math.round((i / data.videoPackets.length) * 65);
+                // Throttle progress updates - only update every progressInterval frames
+                if (i - lastProgressUpdate >= progressInterval || i === totalFrames - 1) {
+                    const progress = 30 + Math.round((i / totalFrames) * 65);
                     onProgress(progress);
+                    lastProgressUpdate = i;
+                }
+                
+                // Add small yield every 50 frames to prevent blocking UI
+                if (i % 50 === 0 && i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
                 }
             }
         }
@@ -229,16 +253,58 @@ function readFileChunk(file, start, end) {
 /**
  * Convert Matroska codec ID to WebCodecs codec string for video
  * @param {string} codecID - Matroska codec ID (e.g., "V_VP8", "V_VP9", "V_AV1")
+ * @param {Object} videoMeta - Video metadata from mkv-demuxer
  * @returns {string|null} - WebCodecs codec string or null if unsupported
  */
-function getWebCodecsVideoCodec(codecID) {
-    const codecMap = {
-        'V_VP8': 'vp8',
-        'V_VP9': 'vp09.00.10.08', // VP9 Profile 0, Level 1.0, 8-bit
-        'V_AV1': 'av01.0.04M.08', // AV1 Main Profile, Level 3.0
-    };
+function getWebCodecsVideoCodec(codecID, videoMeta) {
+    if (codecID === 'V_VP8') {
+        return 'vp8';
+    }
     
-    return codecMap[codecID] || null;
+    if (codecID === 'V_VP9') {
+        // VP9 Profile 0, Level 1.0, 8-bit (common default)
+        // For better compatibility, use generic VP9
+        return 'vp09.00.10.08';
+    }
+    
+    if (codecID === 'V_AV1') {
+        // Derive AV1 level from resolution
+        // AV1 spec defines levels based on resolution and framerate
+        const width = videoMeta?.width || 0;
+        const height = videoMeta?.height || 0;
+        const pixels = width * height;
+        
+        let level = '04M'; // Level 3.0 (default for up to 1080p)
+        
+        // Determine level based on resolution
+        // Reference: AV1 Bitstream & Decoding Process Specification
+        if (pixels <= 147456) { // 512x288 or smaller
+            level = '00'; // Level 2.0
+        } else if (pixels <= 278784) { // 640x480 or smaller  
+            level = '01'; // Level 2.1
+        } else if (pixels <= 665856) { // 1024x768 or smaller
+            level = '02'; // Level 2.2/2.3
+        } else if (pixels <= 2228224) { // 1920x1088 or smaller (1080p)
+            level = '04M'; // Level 3.0
+        } else if (pixels <= 8912896) { // 3840x2160 or smaller (4K)
+            level = '08M'; // Level 4.0
+        } else if (pixels <= 35651584) { // 7680x4320 or smaller (8K)
+            level = '12M'; // Level 5.1
+        } else {
+            level = '16M'; // Level 6.0 (highest)
+        }
+        
+        // AV1 codec string: av01.P.LLT.DD
+        // P = profile (0 = Main)
+        // LL = level
+        // T = tier (M = Main, H = High)
+        // DD = bit depth (08 = 8-bit, 10 = 10-bit)
+        const codec = `av01.0.${level}.08`;
+        console.log(`AV1 codec derived: ${codec} for ${width}x${height} (${pixels} pixels)`);
+        return codec;
+    }
+    
+    return null;
 }
 
 /**
