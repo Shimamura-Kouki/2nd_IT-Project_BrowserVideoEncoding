@@ -26,7 +26,8 @@ export default defineConfig(({ mode }) => {
                 console.log(`   Key: ${env.SSL_KEY_PATH}`);
                 console.log(`   Cert: ${env.SSL_CERT_PATH}`);
             } catch (error) {
-                console.error('❌ Error reading SSL certificates:', error.message);
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error('❌ Error reading SSL certificates:', errorMessage);
                 console.warn('   Falling back to HTTP mode.');
             }
         } else {
