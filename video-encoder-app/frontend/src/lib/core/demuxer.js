@@ -239,9 +239,26 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
             // Otherwise, continue processing - some errors are recoverable
         };
 
-    mp4boxfile.onSamples = (track_id, _user, samples) => {
-        if (track_id === videoTrackId) {
-            for (const sample of samples) {
+    // Backpressure management for decoder queues
+    // For 8K video, we need to prevent overwhelming the decoder
+    const MAX_DECODE_QUEUE_SIZE = 30; // Max frames in decoder queue
+    let pendingSamples = [];
+    let processingQueue = false;
+
+    const processQueuedSamples = async () => {
+        if (processingQueue) return;
+        processingQueue = true;
+
+        while (pendingSamples.length > 0) {
+            const { track_id, sample } = pendingSamples[0];
+
+            if (track_id === videoTrackId) {
+                // Check video decoder queue size before adding more frames
+                while (videoDecoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) {
+                    // Wait for queue to drain
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+
                 const chunk = new EncodedVideoChunk({
                     type: sample.is_sync ? 'key' : 'delta',
                     timestamp: Math.round(1e6 * sample.cts / sample.timescale),
@@ -249,18 +266,36 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
                     data: sample.data
                 });
                 videoDecoder.decode(chunk);
-            }
-        } else if (track_id === audioTrackId) {
-            for (const sample of samples) {
+            } else if (track_id === audioTrackId) {
+                // Check audio decoder queue size
+                while (audioDecoder && audioDecoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+
                 const chunk = new EncodedAudioChunk({
                     type: 'key',
                     timestamp: Math.round(1e6 * sample.cts / sample.timescale),
                     duration: Math.round(1e6 * sample.duration / sample.timescale),
                     data: sample.data
                 });
-                audioDecoder.decode(chunk);
+                if (audioDecoder) {
+                    audioDecoder.decode(chunk);
+                }
             }
+
+            pendingSamples.shift();
         }
+
+        processingQueue = false;
+    };
+
+    mp4boxfile.onSamples = (track_id, _user, samples) => {
+        // Queue all samples for processing
+        for (const sample of samples) {
+            pendingSamples.push({ track_id, sample });
+        }
+        // Start processing queue asynchronously
+        processQueuedSamples();
     };
 
     const chunkSize = 1024 * 1024 * 5;
