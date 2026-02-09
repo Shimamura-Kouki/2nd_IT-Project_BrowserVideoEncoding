@@ -76,6 +76,11 @@ export async function encodeToFile(file, config, onProgress, signal) {
     // Track abort status
     let aborted = false;
     
+    // Framerate control variables (initialized later after metadata extraction)
+    let decodedFrameIndex = 0;
+    let nextOutputFrameIndex = 0;
+    let framerateRatio = 1.0;
+    
     // Cleanup function to handle cancellation
     const cleanup = async () => {
         aborted = true;
@@ -210,10 +215,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
         console.log(`Source framerate: ${sourceFramerate.toFixed(2)} fps`);
         console.log(`Target framerate: ${outputFramerate.toFixed(2)} fps`);
         
-        // Frame filtering state for framerate adjustment
-        let decodedFrameIndex = 0;
-        let nextOutputFrameIndex = 0;
-        const framerateRatio = sourceFramerate / outputFramerate;
+        // Initialize framerate control variables
+        decodedFrameIndex = 0;
+        nextOutputFrameIndex = 0;
+        framerateRatio = sourceFramerate / outputFramerate;
         console.log(`Framerate ratio: ${framerateRatio.toFixed(3)} (will ${framerateRatio > 1 ? 'drop' : 'keep all'} frames)`);
         
         // Calculate actual output dimensions to prevent upscaling
