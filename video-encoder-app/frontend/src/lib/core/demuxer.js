@@ -192,12 +192,24 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
                 };
                 const entry = mp4boxfile.getTrackById(videoTrackId).mdia.minf.stbl.stsd.entries[0];
                 const description = generateDescriptionBuffer(entry);
-                videoDecoder.configure({
+                
+                console.log('Configuring VideoDecoder with:');
+                console.log('  Codec:', videoTrack.codec);
+                console.log('  Resolution:', videoTrack.video.width, 'x', videoTrack.video.height);
+                console.log('  Description buffer:', description ? `${description.length} bytes` : 'null');
+                
+                const config = {
                     codec: videoTrack.codec,
                     codedWidth: videoTrack.video.width,
-                    codedHeight: videoTrack.video.height,
-                    description
-                });
+                    codedHeight: videoTrack.video.height
+                };
+                
+                // Only add description if it exists (some codecs like VP8/VP9 may not need it)
+                if (description) {
+                    config.description = description;
+                }
+                
+                videoDecoder.configure(config);
                 mp4boxfile.setExtractionOptions(videoTrackId, 'video', { nbSamples: 100 });
             }
 
@@ -306,14 +318,39 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
 
 function generateDescriptionBuffer(entry) {
     if (entry.avcC) {
+        // H.264/AVC codec configuration
         const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
         entry.avcC.write(stream);
-        return new Uint8Array(stream.buffer.slice(8));
+        const description = new Uint8Array(stream.buffer.slice(8));
+        console.log('H.264 description extracted:', description.length, 'bytes');
+        return description;
     } else if (entry.hvcC) {
+        // H.265/HEVC codec configuration
         const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
         entry.hvcC.write(stream);
-        return new Uint8Array(stream.buffer.slice(8));
+        const description = new Uint8Array(stream.buffer.slice(8));
+        console.log('H.265 description extracted:', description.length, 'bytes');
+        return description;
+    } else if (entry.av1C) {
+        // AV1 codec configuration
+        const stream = new MP4Box.DataStream(undefined, 0, MP4Box.DataStream.BIG_ENDIAN);
+        entry.av1C.write(stream);
+        const description = new Uint8Array(stream.buffer.slice(8));
+        console.log('AV1 description extracted:', description.length, 'bytes');
+        return description;
+    } else if (entry.vpcC || entry.vp09) {
+        // VP9 codec configuration
+        // VP9 in MP4 uses vpcC box, but WebCodecs VideoDecoder for VP9
+        // typically doesn't require a description buffer
+        console.log('VP9 codec detected, no description buffer needed');
+        return null;
+    } else if (entry.type === 'vp08') {
+        // VP8 codec - no description needed
+        console.log('VP8 codec detected, no description buffer needed');
+        return null;
     }
+    
+    console.warn('Unknown codec type in entry:', entry.type, '- no description buffer generated');
     return null;
 }
 
