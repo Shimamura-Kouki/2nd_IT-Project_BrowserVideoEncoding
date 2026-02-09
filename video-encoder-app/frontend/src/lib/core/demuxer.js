@@ -2,7 +2,9 @@ import MP4Box from 'mp4box';
 import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE, MAX_MP4BOX_PARSING_ERRORS } from '../constants.js';
 
 /**
- * 入力MP4を解析し、WebCodecsのデコーダへ供給する
+ * 入力動画ファイル (MP4/MOV/WebM) を解析し、WebCodecsのデコーダへ供給する
+ * MP4とMOVはMP4Box.jsで解析 (ISOBMFF container)
+ * WebMは現在開発中 - MP4Boxが試行するが、完全な対応には追加の実装が必要
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder

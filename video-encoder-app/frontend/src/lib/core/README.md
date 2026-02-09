@@ -5,26 +5,28 @@ This directory contains the core encoding and demuxing logic for the browser-bas
 ## Architecture
 
 ```txt
-Input Video File (MP4/WebM)
+Input Video File (MP4/MOV/WebM)
       ↓
    demuxer.js ────────→ Detects tracks (video + audio?)
+   (MP4Box.js for           ↓
+    MP4/MOV support)     onReady(hasAudio)
       ↓                         ↓
-  Decoding                  onReady(hasAudio)
+  Decoding                  encoder.js ← Initializes muxer based on hasAudio
   (WebCodecs)                   ↓
-      ↓                   encoder.js ← Initializes muxer based on hasAudio
+      ↓                   Creates appropriate tracks
   Raw Frames                    ↓
-  (VideoFrame,             Creates appropriate tracks
+  (VideoFrame,             Encoding (WebCodecs)
    AudioData)                   ↓
-      ↓                   Encoding (WebCodecs)
-  Re-encoding                   ↓
-  (VideoEncoder,          Encoded Chunks
-   AudioEncoder)          (EncodedVideoChunk,
-      ↓                   EncodedAudioChunk)
+      ↓                   Encoded Chunks
+  Re-encoding             (EncodedVideoChunk,
+  (VideoEncoder,          EncodedAudioChunk)
+   AudioEncoder)                ↓
+      ↓                   mp4-muxer or webm-muxer
   QP/VBR/CBR                    ↓
-  quality control         mp4-muxer or webm-muxer
-      ↓                         ↓
-  Muxed chunks           FileSystem API (output.mp4/webm)
+  quality control         FileSystem API (output.mp4/webm)
       ↓                   or ArrayBuffer (Firefox fallback)
+  Muxed chunks                  
+      ↓                   
  Output file
 ```
 
@@ -60,7 +62,9 @@ Progress callback receives:
 
 Responsible for:
 
-- Parsing input video files (MP4, WebM) using mp4box.js
+- Parsing input video files (MP4, MOV, WebM) using mp4box.js
+  - **MP4/MOV**: Fully supported via MP4Box.js (ISOBMFF containers)
+  - **WebM**: File picker accepts WebM, but full demuxing support requires additional implementation
 - Extracting video and audio tracks from the container
 - **Detecting whether source has audio** (critical for creating correct output)
 - Feeding encoded samples to WebCodecs decoders
