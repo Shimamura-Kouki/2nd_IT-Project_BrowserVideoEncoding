@@ -24,8 +24,9 @@ WebCodecs APIを使用したブラウザ完結型の動画エンコードアプ�
 ### 使用ライブラリ
 
 - **mp4-muxer** v3.x - MP4コンテナ生成（ストリーム書き込み対応）
-- **mp4box.js** v0.5.x - MP4コンテナ解析・デマックス
+- **mp4box.js** v0.5.x - MP4/MOVコンテナ解析・デマックス
 - **webm-muxer** v5.x - WebMコンテナ生成（ストリーム書き込み対応）
+- **mkv-demuxer** v0.1.x - WebM/Matroskaコンテナ解析・デマックス
 - **@sveltejs/vite-plugin-svelte** v6.x - ViteのSvelteプラグイン
 
 ### 使用ブラウザAPI
@@ -259,8 +260,11 @@ frontend/
 
 ### 1. 動画エンコード
 
-- 入力: MP4, WebM, その他ブラウザ対応形式
-- 出力: MP4 (H.264/H.265/AAC) または WebM (VP8/VP9/AV1/Opus)
+- **入力対応形式**: 
+  - MP4 (.mp4, .m4v) - H.264/H.265/AAC
+  - MOV (.mov) - QuickTime形式
+  - WebM (.webm) - VP8/VP9/AV1/Opus/Vorbis
+- **出力**: MP4 (H.264/H.265/AAC) または WebM (VP8/VP9/AV1/Opus)
 - リアルタイム進捗表示（読み込み・エンコード・全体の3つの進捗バー）
 - Androidなどで長時間かかるファイル読み込みと、エンコード処理を別々に表示
 
