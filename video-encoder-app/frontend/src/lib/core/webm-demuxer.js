@@ -321,17 +321,18 @@ function parseAV1CodecString(codecPrivate) {
             bitdepth = twelve_bit ? 12 : 10;
         }
         
-        // Format as 2-digit hex for level
-        const levelHex = seq_level_idx.toString(16).padStart(2, '0').toUpperCase();
+        // Format as 2-digit decimal for level (NOT hex!)
+        // AV1 codec string spec uses decimal: level 5.1 = index 17 = "17" in codec string
+        const levelStr = seq_level_idx.toString(10).padStart(2, '0');
         
         // Build codec string: av01.P.LLT.DD
         // P = profile (0, 1, 2)
-        // LL = level (hex)
+        // LL = level as 2-digit decimal (e.g., "17" for Level 5.1)
         // T = tier (M or H)
         // DD = bit depth (08, 10, 12)
-        const codec = `av01.${seq_profile}.${levelHex}${tierStr}.${bitdepth.toString().padStart(2, '0')}`;
+        const codec = `av01.${seq_profile}.${levelStr}${tierStr}.${bitdepth.toString().padStart(2, '0')}`;
         
-        console.log(`AV1 codec parsed from CodecPrivate: ${codec} (profile=${seq_profile}, level=${seq_level_idx}, tier=${tierStr}, bitdepth=${bitdepth})`);
+        console.log(`AV1 codec parsed from CodecPrivate: ${codec} (profile=${seq_profile}, level_idx=${seq_level_idx}, tier=${tierStr}, bitdepth=${bitdepth})`);
         
         return codec;
     } catch (error) {
