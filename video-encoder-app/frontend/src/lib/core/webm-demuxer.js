@@ -16,6 +16,9 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
     
     try {
         // Initialize the demuxer with the file
+        // Note: mkv-demuxer may log "invalid file size" warnings for certain files,
+        // but this is usually non-fatal and the file can still be processed
+        console.log(`Initializing WebM demuxer for file: ${file.name} (${file.size} bytes)`);
         await demuxer.initFile(file, filePieceSize);
         onProgress(10); // File loaded
         
@@ -121,6 +124,19 @@ export async function demuxWebM(file, videoDecoder, audioDecoder, onReady, onPro
         
         // Call onReady with detected format
         onReady(detectedFormat);
+        
+        // Sort video packets by timestamp to ensure monotonically increasing timestamps
+        // WebM/Matroska packets may not be stored in timestamp order
+        if (data.videoPackets && data.videoPackets.length > 0) {
+            console.log(`Sorting ${data.videoPackets.length} video packets by timestamp...`);
+            data.videoPackets.sort((a, b) => a.timestamp - b.timestamp);
+        }
+        
+        // Sort audio packets by timestamp as well
+        if (data.audioPackets && data.audioPackets.length > 0) {
+            console.log(`Sorting ${data.audioPackets.length} audio packets by timestamp...`);
+            data.audioPackets.sort((a, b) => a.timestamp - b.timestamp);
+        }
         
         // Process video frames
         if (data.videoPackets && data.videoPackets.length > 0) {
