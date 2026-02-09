@@ -126,8 +126,16 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
                     bitrate: audioBitrate
                 };
                 
+                // Fix incomplete AAC codec strings from MP4Box
+                // MP4Box sometimes returns just "mp4a" instead of "mp4a.40.2"
+                let audioCodec = audioTrack.codec;
+                if (audioCodec === 'mp4a') {
+                    audioCodec = 'mp4a.40.2'; // Default to AAC-LC
+                    console.log('Fixed incomplete audio codec: mp4a → mp4a.40.2 (AAC-LC)');
+                }
+                
                 const audioConfig = {
-                    codec: audioTrack.codec,
+                    codec: audioCodec,
                     sampleRate: audioTrack.audio.sample_rate,
                     numberOfChannels: audioTrack.audio.channel_count
                 };
@@ -272,8 +280,14 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
                 });
                 videoDecoder.decode(chunk);
             } else if (track_id === audioTrackId) {
+                // Check if audio decoder is still in valid state
+                if (!audioDecoder || audioDecoder.state !== 'configured') {
+                    console.warn(`AudioDecoder not ready for sample at ${sample.cts}, state: ${audioDecoder?.state || 'null'}`);
+                    return;
+                }
+                
                 // Check audio decoder queue size
-                while (audioDecoder && audioDecoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) {
+                while (audioDecoder.decodeQueueSize >= MAX_DECODE_QUEUE_SIZE) {
                     await new Promise(resolve => setTimeout(resolve, 10));
                 }
 
@@ -283,9 +297,7 @@ function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
                     duration: Math.round(1e6 * sample.duration / sample.timescale),
                     data: sample.data
                 });
-                if (audioDecoder) {
-                    audioDecoder.decode(chunk);
-                }
+                audioDecoder.decode(chunk);
             }
 
             pendingSamples.shift();

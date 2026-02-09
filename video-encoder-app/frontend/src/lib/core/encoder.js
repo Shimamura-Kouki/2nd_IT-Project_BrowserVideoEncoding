@@ -452,8 +452,54 @@ export async function encodeToFile(file, config, onProgress, signal) {
             error: (e) => console.error('VideoEncoder error', e)
         });
 
+        // Calculate appropriate H.264 level based on resolution
+        // H.264 coded dimensions must be multiples of 16 (macroblock size)
+        // Calculate coded area to determine minimum required level
+        let videoCodec = config.video.codec ?? 'avc1.640028';
+        
+        if (videoCodec.startsWith('avc1.')) {
+            const codedWidth = outputWidth;
+            const codedHeight = Math.ceil(outputHeight / 16) * 16; // Round up to multiple of 16
+            const codedArea = codedWidth * codedHeight;
+            
+            // H.264 Level limits (coded area in macroblocks, 1 macroblock = 16x16 = 256 pixels)
+            // Level 3.0: 40,500 macroblocks = 10,368,000 pixels (e.g., 1920x1088)
+            // Level 3.1: 3,600 macroblocks = 921,600 pixels (e.g., 1280x720)
+            // Level 3.2: 4,800 macroblocks = 1,228,800 pixels (e.g., 1280x1024 or odd 720p)
+            // Level 4.0: 8,192 macroblocks = 2,097,152 pixels (e.g., 2048x1024)
+            // Level 4.1: 8,704 macroblocks = 2,228,224 pixels (e.g., 2048x1088)
+            // Level 4.2: 8,704 macroblocks = 2,228,224 pixels (same as 4.1)
+            // Level 5.0: 22,080 macroblocks = 5,652,480 pixels (e.g., 4096x2304)
+            // Level 5.1: 36,864 macroblocks = 9,437,184 pixels (e.g., 4096x2304)
+            // Level 5.2: 36,864 macroblocks = 9,437,184 pixels (same as 5.1)
+            
+            let avcLevel;
+            if (codedArea <= 921600) {
+                avcLevel = '1f'; // Level 3.1 (720p)
+            } else if (codedArea <= 1228800) {
+                avcLevel = '20'; // Level 3.2 (720p with odd aspect ratios)
+            } else if (codedArea <= 2097152) {
+                avcLevel = '28'; // Level 4.0 (1080p)
+            } else if (codedArea <= 2228224) {
+                avcLevel = '29'; // Level 4.1
+            } else if (codedArea <= 5652480) {
+                avcLevel = '32'; // Level 5.0 (4K)
+            } else {
+                avcLevel = '33'; // Level 5.1 (4K+)
+            }
+            
+            // Replace level in codec string
+            // Format: avc1.PPCCLL where PP=profile, CC=constraints, LL=level
+            const parts = videoCodec.split('.');
+            if (parts.length === 2 && parts[1].length === 6) {
+                const profileAndConstraints = parts[1].substring(0, 4);
+                videoCodec = `avc1.${profileAndConstraints}${avcLevel}`;
+                console.log(`Adjusted H.264 codec level for ${outputWidth}x${outputHeight} (coded ${codedWidth}x${codedHeight}, ${codedArea} pixels): ${config.video.codec} → ${videoCodec}`);
+            }
+        }
+
         videoEncoder.configure({
-            codec: config.video.codec ?? 'avc1.640028',
+            codec: videoCodec,
             width: outputWidth,
             height: outputHeight,
             // Include bitrate only when not in quantizer mode
