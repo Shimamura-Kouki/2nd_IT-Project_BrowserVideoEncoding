@@ -1,10 +1,31 @@
 import MP4Box from 'mp4box';
 import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE, MAX_MP4BOX_PARSING_ERRORS } from '../constants.js';
+import { demuxWebM } from './webm-demuxer.js';
+
+/**
+ * ファイルタイプを検出 (拡張子ベース)
+ * @param {File} file
+ * @returns {string} 'mp4', 'mov', 'webm', or 'unknown'
+ */
+function detectFileType(file) {
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith('.webm')) return 'webm';
+    if (fileName.endsWith('.mov')) return 'mov';
+    if (fileName.endsWith('.mp4')) return 'mp4';
+    if (fileName.endsWith('.m4v')) return 'mp4';
+    
+    // Check MIME type as fallback
+    if (file.type === 'video/webm') return 'webm';
+    if (file.type === 'video/quicktime') return 'mov';
+    if (file.type === 'video/mp4') return 'mp4';
+    
+    return 'unknown';
+}
 
 /**
  * 入力動画ファイル (MP4/MOV/WebM) を解析し、WebCodecsのデコーダへ供給する
  * MP4とMOVはMP4Box.jsで解析 (ISOBMFF container)
- * WebMは現在開発中 - MP4Boxが試行するが、完全な対応には追加の実装が必要
+ * WebMはwebm-demuxer.jsで処理 (現在は未実装で適切なエラーメッセージを表示)
  * @param {File} file
  * @param {VideoDecoder} videoDecoder
  * @param {AudioDecoder|null} audioDecoder
@@ -14,6 +35,30 @@ import { CONTAINER_OVERHEAD_PERCENTAGE, MINIMUM_VIDEO_BITRATE, MAX_MP4BOX_PARSIN
  * @throws {Error} When too many MP4Box parsing errors occur or file chunk processing fails
  */
 export async function demuxAndDecode(file, videoDecoder, audioDecoder, onReady, onProgress) {
+    // Detect file type
+    const fileType = detectFileType(file);
+    
+    // Route to appropriate demuxer
+    if (fileType === 'webm') {
+        return demuxWebM(file, videoDecoder, audioDecoder, onReady, onProgress);
+    }
+    
+    // MP4, MOV, and unknown types use MP4Box
+    // MP4Box.js supports ISOBMFF containers: MP4, MOV, M4V, 3GP, etc.
+    return demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress);
+}
+
+/**
+ * MP4/MOV demuxer using MP4Box.js
+ * Supports all ISOBMFF container formats
+ * @param {File} file
+ * @param {VideoDecoder} videoDecoder
+ * @param {AudioDecoder|null} audioDecoder
+ * @param {Function} onReady
+ * @param {Function} onProgress
+ * @returns {Promise<{hasAudio: boolean}>}
+ */
+function demuxMP4(file, videoDecoder, audioDecoder, onReady, onProgress) {
     return new Promise((resolve, reject) => {
         const mp4boxfile = MP4Box.createFile();
         let videoTrackId = null;
