@@ -11,14 +11,35 @@ export default defineConfig(({ mode }) => {
     let httpsConfig = false;
 
     // 環境変数にパスが設定されており、かつファイルが存在する場合のみHTTPSを有効化
-    if (env.SSL_KEY_PATH && env.SSL_CERT_PATH && fs.existsSync(env.SSL_KEY_PATH) && fs.existsSync(env.SSL_CERT_PATH)) {
-        httpsConfig = {
-            key: fs.readFileSync(env.SSL_KEY_PATH),
-            cert: fs.readFileSync(env.SSL_CERT_PATH),
-        };
-        console.log('HTTPS enabled with certs from .env.local');
+    if (env.SSL_KEY_PATH && env.SSL_CERT_PATH) {
+        // ファイルの存在チェック
+        const keyExists = fs.existsSync(env.SSL_KEY_PATH);
+        const certExists = fs.existsSync(env.SSL_CERT_PATH);
+        
+        if (keyExists && certExists) {
+            try {
+                httpsConfig = {
+                    key: fs.readFileSync(env.SSL_KEY_PATH),
+                    cert: fs.readFileSync(env.SSL_CERT_PATH),
+                };
+                console.log('✅ HTTPS enabled with certificates from .env.local');
+                console.log(`   Key: ${env.SSL_KEY_PATH}`);
+                console.log(`   Cert: ${env.SSL_CERT_PATH}`);
+            } catch (error) {
+                console.error('❌ Error reading SSL certificates:', error.message);
+                console.warn('   Falling back to HTTP mode.');
+            }
+        } else {
+            console.warn('⚠️  SSL certificate paths are set in .env.local but files not found:');
+            if (!keyExists) console.warn(`   ❌ Key file not found: ${env.SSL_KEY_PATH}`);
+            if (!certExists) console.warn(`   ❌ Cert file not found: ${env.SSL_CERT_PATH}`);
+            console.warn('   Falling back to HTTP mode.');
+            console.warn('   Please verify the file paths in .env.local');
+        }
     } else {
-        console.warn('Warning: SSL certs not found or not set in .env.local. Falling back to HTTP or auto-generated certs.');
+        console.log('ℹ️  HTTPS not configured (no .env.local with SSL paths).');
+        console.log('   Running in HTTP mode on http://localhost:5173');
+        console.log('   For HTTPS with Tailscale, see .env.local.example');
     }
 
     return {
@@ -27,8 +48,12 @@ export default defineConfig(({ mode }) => {
         server: {
             port: 5173,
             host: true,
+            // Tailscale hostname pattern: *.ts.net を許可
+            // Allow any Tailscale hostname (*.ts.net) and localhost
             allowedHosts: [
-                'thinkbook-14-g6-windows.bass-uaru.ts.net'
+                '.ts.net',  // Tailscale のすべてのホスト名を許可
+                'localhost',
+                '127.0.0.1'
             ],
             https: httpsConfig
         },

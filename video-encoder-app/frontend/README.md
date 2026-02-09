@@ -153,7 +153,57 @@ WebCodecs APIを使用したブラウザ完結型の動画エンコードアプ�
     npm run dev -- --host
     ```
 
-ネットワーク内の他デバイスから `http://<your-ip>:5173` でアクセス可能になります。
+    ネットワーク内の他デバイスから `http://<your-ip>:5173` でアクセス可能になります。
+
+5. **Tailscale経由でHTTPSアクセスする場合**
+
+    WebCodecs APIとFileSystem Access APIは**セキュアコンテキスト**が必要なため、
+    Tailscale経由でリモートアクセスする際はHTTPSが必要です。
+
+    **手順:**
+
+    a. Tailscale証明書を取得:
+    ```bash
+    # Tailscale証明書を取得（Tailscale CLIが必要）
+    tailscale cert <your-hostname>.ts.net
+    ```
+    
+    証明書ファイルは以下の場所に保存されます:
+    - Linux/Mac: `/var/lib/tailscale/certs/`
+    - Windows: `%ProgramData%\Tailscale\certs\`
+
+    b. `.env.local`ファイルを作成:
+    ```bash
+    # .env.local.exampleをコピー
+    cp .env.local.example .env.local
+    ```
+
+    c. `.env.local`を編集して証明書パスを設定:
+    ```env
+    SSL_KEY_PATH=/var/lib/tailscale/certs/<your-hostname>.ts.net.key
+    SSL_CERT_PATH=/var/lib/tailscale/certs/<your-hostname>.ts.net.crt
+    ```
+
+    d. 開発サーバーを起動:
+    ```bash
+    npm run dev
+    ```
+
+    e. ブラウザで `https://<your-hostname>.ts.net:5173` にアクセス
+
+    **トラブルシューティング:**
+    - 「このサイトにアクセスできません」エラーが出る場合:
+      - `.env.local`のパスが正しいか確認
+      - 証明書ファイルが実際に存在するか確認: `ls -l /path/to/cert`
+      - 証明書ファイルの読み取り権限があるか確認
+      - サーバー起動時のログで "✅ HTTPS enabled" が表示されているか確認
+    - HTTPSが有効にならない場合:
+      - サーバー起動時のログを確認（詳細なエラーメッセージが表示されます）
+      - 証明書の有効期限を確認（Tailscale証明書は90日で期限切れ）
+      - 証明書を再取得: `tailscale cert --force <your-hostname>.ts.net`
+
+    **参考リンク:**
+    - [Tailscale HTTPS証明書の取得方法](https://tailscale.com/kb/1153/enabling-https)
 
 ### ビルド
 
