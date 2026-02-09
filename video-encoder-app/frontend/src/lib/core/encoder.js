@@ -690,6 +690,9 @@ export async function encodeToFile(file, config, onProgress, signal) {
     const CHUNK_IDLE_TIMEOUT_MS = 500; // Wait 500ms of no new chunks (increased from 300ms)
     const MAX_STALL_TIME_MS = 60000; // Maximum time without ANY chunks arriving before considering stalled (60s)
                                      // Increased from 30s to accommodate Firefox's extremely slow AV1 encoder
+    const MAX_STALL_TIME_HIGH_COMPLETION_MS = 120000; // More lenient timeout (120s) when >95% complete
+                                                       // Last few chunks often take longer due to encoder finalization
+    const HIGH_COMPLETION_THRESHOLD = 0.95; // Consider 95%+ as "nearly complete"
     const POLL_INTERVAL_MS = 50; // Check every 50ms
     
     console.log('Waiting for all encoder chunks to complete...');
@@ -723,15 +726,27 @@ export async function encodeToFile(file, config, onProgress, signal) {
         const elapsedTotal = now - waitStartTime;
         const timeSinceLastChunk = now - lastChunkArrivalTime;
         
-        // Safety timeout - only if encoding has truly stalled (no chunks for MAX_STALL_TIME_MS)
+        // Calculate completion percentage
+        const completionRatio = totalFrames > 0 ? totalVideoChunksReceived / totalFrames : 0;
+        
+        // Use more lenient timeout when encoding is nearly complete (>95%)
+        // Last few chunks often take longer due to encoder finalization
+        const effectiveStallTimeout = completionRatio >= HIGH_COMPLETION_THRESHOLD 
+            ? MAX_STALL_TIME_HIGH_COMPLETION_MS 
+            : MAX_STALL_TIME_MS;
+        
+        // Safety timeout - only if encoding has truly stalled (no chunks for timeout period)
         // This allows slow encoders (like Firefox AV1) to take as long as needed, as long as they're making progress
-        if (timeSinceLastChunk > MAX_STALL_TIME_MS) {
+        if (timeSinceLastChunk > effectiveStallTimeout) {
             console.warn(`Encoding appears stalled - no chunks for ${(timeSinceLastChunk / 1000).toFixed(1)}s`);
             console.warn(`Final state: video chunks=${totalVideoChunksReceived}, audio chunks=${totalAudioChunksReceived}, pending video=${pendingVideoChunks}, pending audio=${pendingAudioChunks}`);
             console.warn(`Encoder start status: video=${videoEncoderStarted}, audio=${audioEncoderStarted}`);
             if (totalFrames > 0 && totalVideoChunksReceived < totalFrames) {
                 const coverage = ((totalVideoChunksReceived / totalFrames) * 100).toFixed(1);
                 console.warn(`Only received ${totalVideoChunksReceived}/${totalFrames} chunks (${coverage}%) before stall`);
+                if (completionRatio >= HIGH_COMPLETION_THRESHOLD) {
+                    console.warn('Note: Encoding is >95% complete - this may be normal encoder finalization delay');
+                }
             }
             break;
         }
