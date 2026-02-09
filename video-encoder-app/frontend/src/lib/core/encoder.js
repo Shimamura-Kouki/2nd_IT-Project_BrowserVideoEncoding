@@ -81,6 +81,10 @@ export async function encodeToFile(file, config, onProgress, signal) {
     let nextOutputFrameIndex = 0;
     let framerateRatio = 1.0;
     
+    // Output resolution variables (initialized later after metadata extraction)
+    let outputWidth = 0;
+    let outputHeight = 0;
+    
     // Cleanup function to handle cancellation
     const cleanup = async () => {
         aborted = true;
@@ -222,8 +226,8 @@ export async function encodeToFile(file, config, onProgress, signal) {
         console.log(`Framerate ratio: ${framerateRatio.toFixed(3)} (will ${framerateRatio > 1 ? 'drop' : 'keep all'} frames)`);
         
         // Calculate actual output dimensions to prevent upscaling
-        let outputWidth = config.video.width;
-        let outputHeight = config.video.height;
+        outputWidth = config.video.width;
+        outputHeight = config.video.height;
         
         if (videoFormat) {
             const originalWidth = videoFormat.width;
